@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Appearance, Platform, useColorScheme } from "react-native";
 import * as SecureStore from "expo-secure-store";
 
@@ -108,33 +108,36 @@ type Theme = { c: Palette; scheme: Scheme; pref: ThemePref; setPref: (p: ThemePr
 const ThemeContext = createContext<Theme>({ c: DARK, scheme: "dark", pref: DEFAULT_PREF, setPref: () => {} });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [pref, setPrefState] = useState<ThemePref | null>(null);
+  // Appearance is optional startup work. A stalled keystore read must not
+  // suppress the entire React tree (and the session recovery controls).
+  const [pref, setPrefState] = useState<ThemePref>(DEFAULT_PREF);
+  const userSelected = useRef(false);
   // Follows the OS live while pref is "system" (Appearance is "unspecified"),
   // and reports the forced scheme otherwise.
   const os = useColorScheme();
 
   useEffect(() => {
+    let mounted = true;
     readPref().then((p) => {
+      if (!mounted || userSelected.current) return;
       applyNative(p);
       setPrefState(p);
     });
+    return () => { mounted = false; };
   }, []);
 
   const setPref = useCallback((p: ThemePref) => {
+    userSelected.current = true;
     applyNative(p);
     setPrefState(p);
     writePref(p);
   }, []);
 
-  const value = useMemo<Theme | null>(() => {
-    if (!pref) return null;
+  const value = useMemo<Theme>(() => {
     const scheme: Scheme = pref === "system" ? (os === "light" ? "light" : "dark") : pref;
     return { c: scheme === "light" ? LIGHT : DARK, scheme, pref, setPref };
   }, [pref, os, setPref]);
 
-  // Hold the first frame until the stored choice is known so a light-mode
-  // user never sees a dark flash (the read is a single keystore lookup).
-  if (!value) return null;
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 

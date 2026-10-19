@@ -1,0 +1,24 @@
+name: Android 12 cold-start regression
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        type: string
+        required: true
+        description: EAS preview APK build to test
+jobs:
+  cold_start:
+    type: maestro
+    environment: preview
+    params:
+      build_id: ${{ inputs.build_id }}
+      flow_path: .maestro/cold-start.yml
+      android_system_image_package: system-images;android-31;google_apis;x86_64
+      device_identifier: pixel_6
+      record_screen: true
+    hooks:
+      before_maestro_tests:
+        - name: Keep the synthetic session offline
+          run: |
+            adb shell svc wifi disable
+            adb shell svc data disable
