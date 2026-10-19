@@ -20,12 +20,34 @@ const CLIENT_HEADERS: Record<string, string> =
 // Kept warm by getToken/setToken so synchronous callers (e.g. <Image> auth
 // headers) can read it without an async hop — App always getToken()s on boot.
 let cachedToken: string | null = null;
+let tokenRevision = 0;
+
+// Native storage can stall during cold launch. Bound the wait, leaving the
+// stored session intact so the launch screen can offer a retry.
+async function readStoredToken(): Promise<string | null> {
+  if (WEB) return globalThis.localStorage?.getItem(TOKEN_KEY) ?? null;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      SecureStore.getItemAsync(TOKEN_KEY),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("Session storage timed out")), 5000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 export async function getToken(): Promise<string | null> {
-  cachedToken = WEB ? globalThis.localStorage?.getItem(TOKEN_KEY) ?? null : await SecureStore.getItemAsync(TOKEN_KEY);
+  const revision = tokenRevision;
+  const token = await readStoredToken();
+  // A read started before sign-in/sign-out must not undo that newer choice.
+  if (revision === tokenRevision) cachedToken = token;
   return cachedToken;
 }
 export async function setToken(t: string | null): Promise<void> {
+  tokenRevision += 1;
   cachedToken = t;
   if (WEB) {
     if (t) globalThis.localStorage?.setItem(TOKEN_KEY, t);

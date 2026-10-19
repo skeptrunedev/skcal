@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, StyleSheet, BackHandler, Platform, Linking, Alert } from "react-native";
+import { View, Text, Pressable, StyleSheet, BackHandler, Platform, Linking, Alert, ActivityIndicator, Dimensions } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaProvider, useSafeAreaInsets, initialWindowMetrics } from "react-native-safe-area-context";
 import { makeStyles, useTheme, ThemeProvider, type Palette, type ThemePref } from "./src/theme";
 import {
   getToken,
@@ -24,6 +24,13 @@ import { PanelLeftIcon } from "./src/icons";
 
 // Content height of the top bar (below the status-bar inset).
 const TOPBAR_H = 50;
+
+// Render on the first frame instead of waiting for Android's first inset
+// event. The provider continues to update these measurements after layout.
+const INITIAL_METRICS = initialWindowMetrics ?? {
+  frame: { x: 0, y: 0, width: Dimensions.get("window").width, height: Dimensions.get("window").height },
+  insets: { top: 0, bottom: 0, left: 0, right: 0 },
+};
 
 // The paywall sells through StoreKit, so it only exists on iOS. Android has no
 // purchase path until Play Billing ships, and the worker lets Android clients
@@ -56,6 +63,8 @@ function Shell() {
   const { c, scheme, pref, setPref } = useTheme();
   const insets = useSafeAreaInsets();
   const [ready, setReady] = useState(false);
+  const [bootError, setBootError] = useState(false);
+  const [bootAttempt, setBootAttempt] = useState(0);
   const [authed, setAuthed] = useState(false);
   const [view, setView] = useState<DrawerView>("today");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -82,13 +91,19 @@ function Shell() {
   }, []);
 
   useEffect(() => {
-    // Never leave the app on a blank boot screen: if secure storage throws
-    // (locked keychain, unsigned build), fall through to sign-in instead.
+    let mounted = true;
+    setBootError(false);
     getToken()
-      .then((t) => setAuthed(!!t))
-      .catch((e) => console.warn("token read failed, showing sign in:", e))
-      .finally(() => setReady(true));
-  }, []);
+      .then((t) => {
+        if (!mounted) return;
+        setAuthed(!!t);
+        setReady(true);
+      })
+      .catch(() => {
+        if (mounted) setBootError(true);
+      });
+    return () => { mounted = false; };
+  }, [bootAttempt]);
 
   // Deep-link session injection: `skcal://session?token=…` stores the token and
   // marks us signed in. Possessing a valid session token IS authentication, so
@@ -218,7 +233,26 @@ function Shell() {
   // camera cutout sits on a side, so left/right matter as much as top/bottom.
   const sideInsets = { paddingLeft: insets.left, paddingRight: insets.right };
 
-  if (!ready) return <View style={s.boot}>{statusBar}</View>;
+  if (!ready) return (
+    <View style={[s.boot, s.bootContent, sideInsets, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+      {statusBar}
+      {bootError ? (
+        <>
+          <Text style={s.bootTitle}>Couldn’t open skcal</Text>
+          <Text style={s.bootMessage}>Your saved sign-in could not be loaded. Please try again.</Text>
+          <Pressable style={s.retryButton} onPress={() => setBootAttempt((n) => n + 1)}
+            accessibilityRole="button" accessibilityLabel="Try opening skcal again">
+            <Text style={s.retryText}>Try again</Text>
+          </Pressable>
+        </>
+      ) : (
+        <>
+          <ActivityIndicator color={c.amberText} size="large" />
+          <Text style={s.bootTitle} accessibilityLiveRegion="polite">Opening skcal…</Text>
+        </>
+      )}
+    </View>
+  );
   if (!authed)
     return (
       <View style={[s.boot, sideInsets, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
@@ -338,7 +372,7 @@ function Shell() {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider initialMetrics={INITIAL_METRICS}>
       <ThemeProvider>
         <Shell />
       </ThemeProvider>
@@ -349,6 +383,11 @@ export default function App() {
 const useS = makeStyles((C: Palette) =>
   StyleSheet.create({
   boot: { flex: 1, backgroundColor: C.bg },
+  bootContent: { alignItems: "center", justifyContent: "center", gap: 16 },
+  bootTitle: { color: C.fg, fontSize: 20, fontWeight: "600" },
+  bootMessage: { color: C.muted, fontSize: 15, textAlign: "center", marginHorizontal: 24 },
+  retryButton: { backgroundColor: C.amber, borderRadius: 10, paddingHorizontal: 24, paddingVertical: 14 },
+  retryText: { color: C.amberInk, fontWeight: "600", fontSize: 16 },
   root: { flex: 1, backgroundColor: C.bg },
   topbar: {
     flexDirection: "row", alignItems: "center", gap: 8,
