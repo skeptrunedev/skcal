@@ -1,0 +1,80 @@
+appId: fit.skcal.app
+---
+- launchApp:
+    clearState: true
+    permissions:
+      all: deny
+- extendedWaitUntil:
+    visible: Text me a code
+    timeout: 20000
+- takeScreenshot: first-launch
+- repeat:
+    times: 5
+    commands:
+      - launchApp:
+          clearState: false
+          permissions:
+            all: deny
+      - extendedWaitUntil:
+          visible: Text me a code
+          timeout: 10000
+# This is deliberately not a real credential. The workflow disables network
+# access before starting, so it exercises native session persistence without
+# contacting the live API or reading/writing any user's data.
+- openLink:
+    link: skcal://session?token=cold-start-regression-not-a-real-session
+    autoVerify: false
+- extendedWaitUntil:
+    visible: Today
+    timeout: 10000
+- tapOn: Account
+- tapOn: Light appearance
+- tapOn: Close account menu
+- repeat:
+    times: 5
+    commands:
+      - launchApp:
+          clearState: false
+          permissions:
+            all: deny
+      - extendedWaitUntil:
+          visible: Today
+          timeout: 10000
+- takeScreenshot: restored-session-light
+- tapOn: Account
+- assertVisible:
+    text: Light appearance
+    selected: true
+- tapOn: Dark appearance
+- tapOn: Close account menu
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: Today
+    timeout: 10000
+- takeScreenshot: restored-session-dark
+- tapOn: Account
+- assertVisible:
+    text: Dark appearance
+    selected: true
+- tapOn: System appearance
+- tapOn: Close account menu
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: Today
+    timeout: 10000
+- tapOn: Account
+- assertVisible:
+    text: System appearance
+    selected: true
+- tapOn: Sign out
+- extendedWaitUntil:
+    visible: Text me a code
+    timeout: 10000
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: Text me a code
+    timeout: 10000
+- takeScreenshot: signed-out-relaunch
