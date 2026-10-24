@@ -129,43 +129,47 @@ export function Dashboard({
           {weight.note && <p className="note-line">“{weight.note}”</p>}
         </section>
 
-        {/* NUTRITION */}
-        <section className="card">
-          <div className="card-head">
-            <p className="label">Nutrition / {dayLabel(date)}</p>
-            {nutStatus && <span className={`status ${nutStatus[0]}`}>{nutStatus[1]}</span>}
-          </div>
-          {nutritionToday == null ? (
-            <p className="empty">log today's intake — tap +</p>
-          ) : (
-            <div className="rows">
-              <div className="crow">
-                <div className="crow-top">
-                  <span className="crow-label">Calories</span>
-                  <span className="crow-val">
-                    {kcal ?? "—"}
-                    <span className="unit"> / {kcalTarget}</span>
-                  </span>
-                </div>
-                <div className="crow-bar">
-                  <span className={kcal != null && kcal > kcalTarget ? "attention" : "info"} style={{ width: `${kcalPct}%` }} />
-                </div>
-              </div>
-              <div className="crow">
-                <div className="crow-top">
-                  <span className="crow-label">Protein</span>
-                  <span className="crow-val">
-                    {protein ?? "—"}
-                    <span className="unit"> / {proteinTarget} g</span>
-                  </span>
-                </div>
-                <div className="crow-bar">
-                  <span className={protein != null && protein >= proteinTarget ? "" : "info"} style={{ width: `${proteinPct}%` }} />
-                </div>
-              </div>
+        {/* NUTRITION + FOOD LOG: one unit so the log always sits directly under the totals */}
+        <div className="card-group">
+          <section className="card">
+            <div className="card-head">
+              <p className="label">Nutrition / {dayLabel(date)}</p>
+              {nutStatus && <span className={`status ${nutStatus[0]}`}>{nutStatus[1]}</span>}
             </div>
-          )}
-        </section>
+            {nutritionToday == null ? (
+              <p className="empty">log today's intake — tap +</p>
+            ) : (
+              <div className="rows">
+                <div className="crow">
+                  <div className="crow-top">
+                    <span className="crow-label">Calories</span>
+                    <span className="crow-val">
+                      {kcal ?? "—"}
+                      <span className="unit"> / {kcalTarget}</span>
+                    </span>
+                  </div>
+                  <div className="crow-bar">
+                    <span className={kcal != null && kcal > kcalTarget ? "attention" : "info"} style={{ width: `${kcalPct}%` }} />
+                  </div>
+                </div>
+                <div className="crow">
+                  <div className="crow-top">
+                    <span className="crow-label">Protein</span>
+                    <span className="crow-val">
+                      {protein ?? "—"}
+                      <span className="unit"> / {proteinTarget} g</span>
+                    </span>
+                  </div>
+                  <div className="crow-bar">
+                    <span className={protein != null && protein >= proteinTarget ? "" : "info"} style={{ width: `${proteinPct}%` }} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <FoodLog date={date} refreshKey={refreshKey} onChange={onChange} />
+        </div>
 
         {/* SHOULDER : WAIST */}
         <section className="card">
@@ -198,8 +202,6 @@ export function Dashboard({
             </div>
           )}
         </section>
-
-        <FoodLog date={date} refreshKey={refreshKey} onChange={onChange} />
 
         <WorkoutLog date={date} refreshKey={refreshKey} />
 

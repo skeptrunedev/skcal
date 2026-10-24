@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { kgToLb } from "../shared/types";
 import { api } from "./api";
 import type { WeightReading } from "./api";
 
 const fmtDate = (ts: number) => new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+const PAGE = 7;
 
 export function WeightHistory() {
   const [rows, setRows] = useState<WeightReading[] | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  // 0 = the newest PAGE readings; higher pages walk back in time.
+  const [page, setPage] = useState(0);
 
   const load = useCallback(() => {
     api.weightList().then(setRows).catch(() => setRows([]));
@@ -37,14 +41,33 @@ export function WeightHistory() {
 
   if (!rows) return null;
 
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  const at = Math.min(page, pages - 1);
+  const visible = rows.slice(at * PAGE, (at + 1) * PAGE);
+
   return (
     <section className="card">
-      <p className="label">Weigh-ins · tap to note</p>
+      <div className="card-head">
+        <p className="label">Weigh-ins · tap to note</p>
+        {pages > 1 && (
+          <div className="pager">
+            <button className="daynav-btn" onClick={() => setPage(at - 1)} disabled={at === 0} aria-label="Newer weigh-ins">
+              <ChevronLeft />
+            </button>
+            <span className="daynav-label">
+              {at * PAGE + 1}–{at * PAGE + visible.length} of {rows.length}
+            </span>
+            <button className="daynav-btn" onClick={() => setPage(at + 1)} disabled={at === pages - 1} aria-label="Older weigh-ins">
+              <ChevronRight />
+            </button>
+          </div>
+        )}
+      </div>
       {rows.length === 0 ? (
         <p className="empty">no weigh-ins yet</p>
       ) : (
         <div className="rows">
-          {rows.map((r) => (
+          {visible.map((r) => (
             <div className="crow" key={r.id}>
               <div className="crow-top">
                 <span className="crow-label">

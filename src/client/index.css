@@ -270,6 +270,13 @@ a {
   padding: 1.15rem 1.25rem;
 }
 
+/* cards that must stay adjacent (nutrition → food log), even across masonry columns */
+.card-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
 .hero {
   background: var(--surface);
 }
@@ -326,6 +333,11 @@ a {
 .daynav-btn svg {
   width: 1.05rem;
   height: 1.05rem;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
 }
 .daynav-label {
   font-family: var(--mono);
@@ -1176,9 +1188,13 @@ a {
     column-count: 2;
     column-gap: 1.1rem;
   }
-  .grid > .card {
+  .grid > .card,
+  .grid > .card-group {
     break-inside: avoid;
     margin: 0 0 1.1rem;
+  }
+  .card-group {
+    gap: 1.1rem;
   }
   .hero {
     column-span: all;
@@ -1226,7 +1242,8 @@ a {
   .card {
     transition: border-color 200ms var(--ease-out);
   }
-  .grid > .card:hover {
+  .grid > .card:hover,
+  .card-group > .card:hover {
     border-color: var(--hover-line);
   }
   .nav-btn:hover,

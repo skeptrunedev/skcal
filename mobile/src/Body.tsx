@@ -13,7 +13,7 @@ import { useContentWidth, COMPACT_WIDTH } from "./layout";
 import { weeklyDeltaLb, weightInsight } from "./weight";
 
 const DAY = 86_400_000;
-const PAGE = 30;
+const PAGE = 7;
 const fmtDate = (ts: number) => new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 const fmtDateYear = (ts: number) => new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 
@@ -36,7 +36,8 @@ export function Body({
   const [measurements, setMeasurements] = useState<Measurement[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [shown, setShown] = useState(PAGE);
+  // 0 = the newest PAGE weigh-ins; higher pages walk back in time.
+  const [page, setPage] = useState(0);
   const [sheet, setSheet] = useState<"weight" | "measure" | null>(null);
 
   const load = useCallback(async () => {
@@ -146,18 +147,41 @@ export function Body({
     </View>
   );
 
+  const pages = Math.max(1, Math.ceil(weights.length / PAGE));
+  const at = Math.min(page, pages - 1);
+  const visible = weights.slice(at * PAGE, (at + 1) * PAGE);
   const historyCard = (
     <View style={s.card}>
       <Text style={s.cardLabel}>WEIGH-INS · TAP TO NOTE</Text>
       {weights.length === 0 ? (
         <Text style={s.empty}>no weigh-ins yet</Text>
       ) : (
-        weights.slice(0, shown).map((w) => <WeighIn key={w.id} reading={w} onSaved={load} />)
+        visible.map((w) => <WeighIn key={w.id} reading={w} onSaved={load} />)
       )}
-      {weights.length > shown && (
-        <Pressable style={s.more} onPress={() => setShown((n) => n + PAGE)} accessibilityRole="button">
-          <Text style={s.moreText}>SHOW {Math.min(PAGE, weights.length - shown)} MORE</Text>
-        </Pressable>
+      {pages > 1 && (
+        <View style={s.pager}>
+          <Pressable
+            style={s.more}
+            onPress={() => setPage(at - 1)}
+            disabled={at === 0}
+            accessibilityRole="button"
+            accessibilityLabel="Newer weigh-ins"
+          >
+            <Text style={[s.moreText, at === 0 && s.pagerOff]}>‹ NEWER</Text>
+          </Pressable>
+          <Text style={s.pagerLabel}>
+            {at * PAGE + 1}–{at * PAGE + visible.length} of {weights.length}
+          </Text>
+          <Pressable
+            style={s.more}
+            onPress={() => setPage(at + 1)}
+            disabled={at === pages - 1}
+            accessibilityRole="button"
+            accessibilityLabel="Older weigh-ins"
+          >
+            <Text style={[s.moreText, at === pages - 1 && s.pagerOff]}>OLDER ›</Text>
+          </Pressable>
+        </View>
       )}
     </View>
   );
@@ -397,6 +421,9 @@ const useS = makeStyles((c) =>
     },
     more: { alignSelf: "center", paddingVertical: 10, paddingHorizontal: 14, marginTop: 4 },
     moreText: { color: c.amberText, fontSize: 11.5, fontFamily: "monospace", letterSpacing: 1 },
+    pager: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
+    pagerLabel: { color: c.muted, fontSize: 11.5, fontFamily: "monospace" },
+    pagerOff: { color: c.dim },
     fieldLabel: { color: c.muted, fontSize: 12, fontFamily: "monospace", letterSpacing: 1 },
     sites: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
     site: { borderWidth: 1, borderColor: c.line, borderRadius: 999, paddingVertical: 7, paddingHorizontal: 12 },
