@@ -47,22 +47,7 @@ export function WeightHistory() {
 
   return (
     <section className="card">
-      <div className="card-head">
-        <p className="label">Weigh-ins · tap to note</p>
-        {pages > 1 && (
-          <div className="pager">
-            <button className="daynav-btn" onClick={() => setPage(at - 1)} disabled={at === 0} aria-label="Newer weigh-ins">
-              <ChevronLeft />
-            </button>
-            <span className="daynav-label">
-              {at * PAGE + 1}–{at * PAGE + visible.length} of {rows.length}
-            </span>
-            <button className="daynav-btn" onClick={() => setPage(at + 1)} disabled={at === pages - 1} aria-label="Older weigh-ins">
-              <ChevronRight />
-            </button>
-          </div>
-        )}
-      </div>
+      <p className="label">Weigh-ins · tap to note</p>
       {rows.length === 0 ? (
         <p className="empty">no weigh-ins yet</p>
       ) : (
@@ -108,6 +93,19 @@ export function WeightHistory() {
               )}
             </div>
           ))}
+        </div>
+      )}
+      {pages > 1 && (
+        <div className="pager">
+          <button className="daynav-btn" onClick={() => setPage(at - 1)} disabled={at === 0} aria-label="Newer weigh-ins">
+            <ChevronLeft />
+          </button>
+          <span className="daynav-label">
+            {at * PAGE + 1}–{at * PAGE + visible.length} of {rows.length}
+          </span>
+          <button className="daynav-btn" onClick={() => setPage(at + 1)} disabled={at === pages - 1} aria-label="Older weigh-ins">
+            <ChevronRight />
+          </button>
         </div>
       )}
     </section>
