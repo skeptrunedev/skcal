@@ -198,15 +198,15 @@ export function Body({
           <View style={s.columns}>
             <View style={s.column}>
               {summary}
-              {measurementsCard}
+              {historyCard}
             </View>
-            <View style={s.column}>{historyCard}</View>
+            <View style={s.column}>{measurementsCard}</View>
           </View>
         ) : (
           <>
             {summary}
-            {measurementsCard}
             {historyCard}
+            {measurementsCard}
           </>
         )}
       </ScrollView>

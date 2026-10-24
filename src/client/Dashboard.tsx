@@ -171,6 +171,8 @@ export function Dashboard({
           <FoodLog date={date} refreshKey={refreshKey} onChange={onChange} />
         </div>
 
+        <WeightHistory />
+
         {/* SHOULDER : WAIST */}
         <section className="card">
           <p className="label">Shoulder : Waist</p>
@@ -204,8 +206,6 @@ export function Dashboard({
         </section>
 
         <WorkoutLog date={date} refreshKey={refreshKey} />
-
-        <WeightHistory />
 
         <Reminders />
       </div>
