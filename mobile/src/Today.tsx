@@ -417,10 +417,10 @@ export function Today({
     </Pressable>
   );
 
-  // Right after the weight card, as on the web Today (after the weight hero).
+  // Right after the meals, as on the web Today (under the food log).
   const phaseCard = <PhaseCard phase={data.phase} onChange={onPhaseChanged} />;
   const mealsCard = <MealsCard meals={meals} onChanged={onMealsChanged} />;
-  // Right after the meals, as on the web Today.
+  // Under the phase card, as on the web Today.
   const weighInsCard = weights && <WeighInsCard weights={weights} onSaved={loadWeights} />;
   const workoutsCard = <WorkoutsCard workouts={workouts} onChanged={loadWorkouts} />;
   const remindersCard = reminders && <RemindersCard data={reminders} onChanged={loadReminders} />;
@@ -441,7 +441,6 @@ export function Today({
         <View style={s.columns}>
           <View style={s.column}>
             {weightCard}
-            {phaseCard}
             {ratioCard}
             {measurementsCard}
             {workoutsCard}
@@ -449,6 +448,7 @@ export function Today({
           <View style={s.column}>
             {nutritionCard}
             {mealsCard}
+            {phaseCard}
             {weighInsCard}
             {remindersCard}
             {healthCard}
@@ -457,9 +457,9 @@ export function Today({
       ) : (
         <>
           {weightCard}
-          {phaseCard}
           {nutritionCard}
           {mealsCard}
+          {phaseCard}
           {weighInsCard}
           {ratioCard}
           {measurementsCard}

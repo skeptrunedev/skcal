@@ -134,8 +134,6 @@ export function Dashboard({
           {weight.note && <p className="note-line">“{weight.note}”</p>}
         </section>
 
-        <PhaseCard phase={data.phase} onChange={onChange} />
-
         {/* NUTRITION + FOOD LOG: one unit so the log always sits directly under the totals */}
         <div className="card-group">
           <section className="card">
@@ -177,6 +175,8 @@ export function Dashboard({
 
           <FoodLog date={date} refreshKey={refreshKey} onChange={onChange} />
         </div>
+
+        <PhaseCard phase={data.phase} onChange={onChange} />
 
         <WeightHistory />
 
