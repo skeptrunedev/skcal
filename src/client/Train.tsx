@@ -179,13 +179,18 @@ function SessionView({
         </p>
         {p.startedAt != null && (
           <p className="meta train-progress">
-            {clock(p.startedAt)}
-            {p.elapsedS != null ? ` · ${dur(p.elapsedS)}` : ""}
+            started {clock(p.startedAt)}
+            {p.elapsedS != null ? ` · ${dur(p.elapsedS)} in` : ""}
             {` · ${p.volumeLb.toLocaleString()} lb`}
-            {p.avgRestS != null ? ` · avg rest ${dur(p.avgRestS)}` : ""}
           </p>
         )}
-        {resting != null && <p className="train-rest">Resting {dur(resting)}</p>}
+        {(p.avgRestS != null || resting != null) && (
+          <p className="meta train-progress">
+            {p.avgRestS != null && `avg rest ${dur(p.avgRestS)}`}
+            {p.avgRestS != null && resting != null && " · "}
+            {resting != null && <span className="train-rest">resting {dur(resting)}</span>}
+          </p>
+        )}
         {calOpen && <MesoCalendar summary={summary} at={{ week: s.week, day: s.day }} onPick={open} />}
       </section>
 

@@ -247,13 +247,18 @@ function SessionView({
         </Text>
         {p.startedAt != null && (
           <Text style={st.meta}>
-            {clock(p.startedAt)}
-            {p.elapsedS != null ? ` · ${dur(p.elapsedS)}` : ""}
+            started {clock(p.startedAt)}
+            {p.elapsedS != null ? ` · ${dur(p.elapsedS)} in` : ""}
             {` · ${p.volumeLb.toLocaleString()} lb`}
-            {p.avgRestS != null ? ` · avg rest ${dur(p.avgRestS)}` : ""}
           </Text>
         )}
-        {resting != null && <Text style={st.rest}>Resting {dur(resting)}</Text>}
+        {(p.avgRestS != null || resting != null) && (
+          <Text style={st.meta}>
+            {p.avgRestS != null && `avg rest ${dur(p.avgRestS)}`}
+            {p.avgRestS != null && resting != null && " · "}
+            {resting != null && <Text style={st.rest}>resting {dur(resting)}</Text>}
+          </Text>
+        )}
         {calOpen && <MesoCalendar summary={summary} at={{ week: s.week, day: s.day }} onPick={open} />}
       </View>
 
@@ -1029,7 +1034,7 @@ const useS = makeStyles((c) =>
     setRow: { flexDirection: "row", alignItems: "center", gap: 8 },
     setN: { width: 20, textAlign: "center" },
     setTime: { marginLeft: 28, marginTop: 3, color: c.dim, fontSize: 10.5, fontFamily: "monospace", fontVariant: ["tabular-nums"] },
-    rest: { marginTop: 6, color: c.amberText, fontSize: 13, fontFamily: "monospace", fontVariant: ["tabular-nums"] },
+    rest: { color: c.amberText },
     setCol: { flex: 1, minWidth: 0 },
     setLogCol: { width: 44 },
     setHead: { color: c.dim, fontSize: 9.5, fontFamily: "monospace", letterSpacing: 1.2, textAlign: "center" },

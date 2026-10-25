@@ -2483,11 +2483,7 @@ a {
   font-variant-numeric: tabular-nums;
 }
 .train-rest {
-  margin-top: 0.35rem;
-  font-family: var(--mono);
-  font-size: 0.8rem;
   color: var(--accent);
-  font-variant-numeric: tabular-nums;
 }
 .train-set.done input {
   border-color: transparent;
