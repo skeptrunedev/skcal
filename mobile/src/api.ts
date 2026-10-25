@@ -4,12 +4,14 @@ import * as SecureStore from "expo-secure-store";
 // a web-standard streaming Response so we can read the NDJSON token stream.
 import { fetch as streamFetch } from "expo/fetch";
 
-const BASE = "https://app.skcal.fit";
-const TOKEN_KEY = "skcal_session_token";
-
 // expo-secure-store has no web implementation (its web module is empty), so
 // the Expo-web preview falls back to localStorage.
 const WEB = Platform.OS === "web";
+
+// The Expo-web dev preview calls its own origin; metro.config.js forwards
+// /api to production (the worker sends no CORS headers).
+const BASE = WEB && __DEV__ ? "" : "https://app.skcal.fit";
+const TOKEN_KEY = "skcal_session_token";
 
 // Sent on every request to the worker so it knows which app is calling. The
 // worker's temporary ANDROID_FREE_UNTIL_PLAY_BILLING policy keys off
