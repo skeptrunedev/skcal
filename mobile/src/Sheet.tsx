@@ -8,7 +8,8 @@ import { makeStyles, useTheme } from "./theme";
 
 // Bottom sheet for the small forms (log a weigh-in, add a measurement, fix a
 // food item), styled like the Agent's photo-source sheet. The body scrolls so
-// a landscape phone with the keyboard up can still reach Save.
+// a landscape phone with the keyboard up can still reach Save. Without onSave
+// it's a pick-and-close sheet: only the dismiss button (cancelLabel) shows.
 export function Sheet({
   open,
   title,
@@ -17,15 +18,19 @@ export function Sheet({
   saving,
   error,
   saveLabel = "Save",
+  cancelLabel = "Cancel",
+  saveDisabled = false,
   children,
 }: {
   open: boolean;
   title: string;
   onClose: () => void;
-  onSave: () => void;
+  onSave?: () => void;
   saving: boolean;
   error: string | null;
   saveLabel?: string;
+  cancelLabel?: string;
+  saveDisabled?: boolean;
   children: ReactNode;
 }) {
   const s = useS();
@@ -62,17 +67,19 @@ export function Sheet({
               {error ? <Text style={s.err}>{error}</Text> : null}
               <View style={s.actions}>
                 <Pressable style={s.ghost} onPress={onClose} disabled={saving} accessibilityRole="button">
-                  <Text style={s.ghostText}>Cancel</Text>
+                  <Text style={s.ghostText}>{cancelLabel}</Text>
                 </Pressable>
-                <Pressable
-                  style={[s.btn, saving && s.btnDim]}
-                  onPress={onSave}
-                  disabled={saving}
-                  accessibilityRole="button"
-                  accessibilityLabel={saveLabel}
-                >
-                  {saving ? <ActivityIndicator color={c.amberInk} /> : <Text style={s.btnText}>{saveLabel}</Text>}
-                </Pressable>
+                {onSave && (
+                  <Pressable
+                    style={[s.btn, (saving || saveDisabled) && s.btnDim]}
+                    onPress={onSave}
+                    disabled={saving || saveDisabled}
+                    accessibilityRole="button"
+                    accessibilityLabel={saveLabel}
+                  >
+                    {saving ? <ActivityIndicator color={c.amberInk} /> : <Text style={s.btnText}>{saveLabel}</Text>}
+                  </Pressable>
+                )}
               </View>
             </ScrollView>
           </Pressable>

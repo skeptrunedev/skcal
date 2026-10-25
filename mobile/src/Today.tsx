@@ -12,6 +12,7 @@ import { WeightChart } from "./WeightChart";
 import { MealsCard } from "./Meals";
 import { WeighInsCard } from "./WeighIns";
 import { WorkoutsCard } from "./Workouts";
+import { PhaseCard } from "./PhaseCard";
 import { MEASUREMENT_SITES, siteLabel } from "./sites";
 import { useContentWidth, COMPACT_WIDTH } from "./layout";
 import { weeklyDeltaLb, weightInsight } from "./weight";
@@ -268,6 +269,15 @@ export function Today({
     }
   }, [loadMeals]);
 
+  // Starting or ending a phase can reset the calorie and protein targets.
+  const onPhaseChanged = useCallback(async () => {
+    try {
+      setData(await dashboard());
+    } catch {
+      // the next pull-to-refresh or foreground reload catches up
+    }
+  }, []);
+
   const connectHealth = useCallback(async () => {
     const ok = await connectAppleHealth().catch(() => false);
     if (!ok) {
@@ -306,7 +316,7 @@ export function Today({
 
   const latestLb = data.weight.latestKg != null ? kgToLb(data.weight.latestKg) : null;
   const trend = data.weight.trend;
-  const ins = weightInsight(latestLb, weeklyDeltaLb(trend), c);
+  const ins = weightInsight(latestLb, weeklyDeltaLb(trend), c, data.phase?.kind ?? null);
   const bySite = (site: string) => data.measurementsLatest.find((m) => m.site === site);
   const waist = bySite("waist");
   const arm = bySite("arm_r") ?? bySite("arm_l");
@@ -407,6 +417,8 @@ export function Today({
     </Pressable>
   );
 
+  // Right after the weight card, as on the web Today (after the weight hero).
+  const phaseCard = <PhaseCard phase={data.phase} onChange={onPhaseChanged} />;
   const mealsCard = <MealsCard meals={meals} onChanged={onMealsChanged} />;
   // Right after the meals, as on the web Today.
   const weighInsCard = weights && <WeighInsCard weights={weights} onSaved={loadWeights} />;
@@ -429,6 +441,7 @@ export function Today({
         <View style={s.columns}>
           <View style={s.column}>
             {weightCard}
+            {phaseCard}
             {ratioCard}
             {measurementsCard}
             {workoutsCard}
@@ -444,6 +457,7 @@ export function Today({
       ) : (
         <>
           {weightCard}
+          {phaseCard}
           {nutritionCard}
           {mealsCard}
           {weighInsCard}

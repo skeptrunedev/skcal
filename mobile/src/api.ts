@@ -105,6 +105,7 @@ export type Dashboard = {
   measurementsLatest: { site: string; valueCm: number; ts: number }[];
   shoulderToWaist: number | null;
   nutritionToday: { kcal: number | null; proteinG: number | null } | null;
+  phase: Phase | null;
 };
 
 export async function dashboard(): Promise<Dashboard> {
@@ -452,6 +453,168 @@ export async function deleteWorkout(id: string): Promise<void> {
   const r = await req(`/api/workouts/${id}`, { method: "DELETE" });
   if (!r.ok) return fail(r, "deleteWorkout");
 }
+
+// JSON call that surfaces the worker's { error } message on failure, like the
+// web client's jcall (and fail() above for 401 / 402).
+async function call<T>(path: string, method = "GET", body?: unknown): Promise<T> {
+  const r = await req(path, { method, body: body !== undefined ? JSON.stringify(body) : undefined });
+  if (!r.ok) return fail(r, `${method} ${path}`);
+  return r.json() as Promise<T>;
+}
+
+// ---- Goal phases (bulk / cut / maintain), same shapes as src/shared/types.ts ----
+export type Phase = {
+  id: string;
+  kind: "bulk" | "cut" | "maintain";
+  startDate: string;
+  plannedEndDate: string | null;
+  endedDate: string | null;
+  active: boolean;
+  startWeightLb: number | null;
+  goalWeightLb: number | null;
+  ratePctPerWeek: number | null;
+  dailyKcalTarget: number | null;
+  proteinTargetG: number | null;
+  note: string | null;
+  progress: {
+    weeksElapsed: number;
+    weeksPlanned: number | null;
+    latestWeightLb: number | null;
+    changeLb: number | null;
+    plannedLbPerWeek: number | null;
+    actualLbPerWeek: number | null;
+    actualPctPerWeek: number | null;
+    status: "on_track" | "too_fast" | "too_slow" | "not_enough_data";
+  };
+};
+export type PhaseInput = {
+  kind?: Phase["kind"];
+  startDate?: string;
+  plannedEndDate?: string | null;
+  goalWeightLb?: number | null;
+  ratePctPerWeek?: number | null;
+  dailyKcal?: number | null;
+  proteinG?: number | null;
+  note?: string | null;
+};
+
+export const phases = (date: string) =>
+  call<{ active: Phase | null; phases: Phase[]; maintenance: { kcal: number; days: number } | null }>(`/api/phases?date=${date}`);
+export const startPhase = (date: string, input: PhaseInput) =>
+  call<{ ok: true; phase: Phase; kcalSource: "given" | "estimated" | "unchanged"; maintenanceKcal: number | null }>(
+    `/api/phases?date=${date}`,
+    "POST",
+    input,
+  );
+export const updatePhase = (id: string, date: string, input: PhaseInput) =>
+  call<{ ok: true; phase: Phase }>(`/api/phases/${id}?date=${date}`, "PATCH", input);
+export const endPhase = (id: string, date: string) => call<{ ok: true }>(`/api/phases/${id}/end?date=${date}`, "POST");
+
+// ---- Training: RP-style mesocycles (same shapes as src/shared/types.ts) ----
+export type MuscleInfo = {
+  key: string;
+  label: string;
+  mv: number;
+  mev: number;
+  mavLow: number;
+  mavHigh: number;
+  mrv: number;
+  freqLow: number;
+  freqHigh: number;
+  defaultReps: number;
+};
+export type TrainingTemplate = { key: string; name: string; description: string; days: { label: string; muscles: string[] }[] };
+export type Exercise = { id: string; name: string; muscle: string; equipment: string; videoUrl: string | null; custom: boolean };
+export type FeedbackScales = { soreness: string[]; pump: string[]; jointPain: string[]; workload: string[] };
+export type TrainingLibrary = {
+  muscles: MuscleInfo[];
+  equipment: string[];
+  templates: TrainingTemplate[];
+  feedbackScales: FeedbackScales;
+  exercises: Exercise[];
+};
+export type MesoCalendarWeek = { week: number; rir: number | null; deload: boolean; days: { day: number; label: string | null; done: boolean }[] };
+export type MesoSummary = {
+  id: string;
+  name: string;
+  weeks: number;
+  daysPerWeek: number;
+  startDate: string;
+  status: "active" | "completed" | "abandoned";
+  endedDate: string | null;
+  notes: string | null;
+  sessionsDone: number;
+  sessionsTotal: number;
+  next: { week: number; day: number; label: string | null } | null;
+  muscles: string[];
+  calendar: MesoCalendarWeek[];
+};
+export type MesoDetail = MesoSummary & {
+  days: { id: string; day: number; label: string | null; slots: { id: string; muscle: string; exerciseId: string; exerciseName: string; equipment: string }[] }[];
+  volume: { muscle: string; label: string; mev: number | null; mav: [number, number] | null; mrv: number | null; setsByWeek: number[] }[];
+};
+export type TrainingSet = {
+  id: string;
+  position: number;
+  targetReps: number | null;
+  targetWeightLb: number | null;
+  targetRir: number | null;
+  weightLb: number | null;
+  reps: number | null;
+  done: boolean;
+  loggedAt: number | null;
+};
+export type MuscleFeedback = { muscle: string; soreness: number | null; pump: number | null; jointPain: number | null; workload: number | null };
+// askSoreness: the muscle was trained before (an earlier week or day), so its recovery can be asked.
+export type SessionFeedback = MuscleFeedback & { askSoreness: boolean };
+export type TrainingSession = {
+  meso: { id: string; name: string; weeks: number; daysPerWeek: number; status: string };
+  week: number;
+  day: number;
+  dayId: string;
+  label: string | null;
+  targetRir: number | null;
+  deload: boolean;
+  completed: boolean;
+  completedAt: number | null;
+  exercises: {
+    slotId: string;
+    muscle: string;
+    exerciseId: string;
+    exerciseName: string;
+    equipment: string;
+    sets: TrainingSet[];
+    lastWeek: { weightLb: number | null; reps: number | null }[];
+  }[];
+  feedback: SessionFeedback[];
+  feedbackScales: FeedbackScales;
+};
+export type MesoPlanDay = { label?: string; slots: { muscle: string; exerciseId?: string }[] };
+
+export const trainingLibrary = () => call<TrainingLibrary>(`/api/training/library`);
+export const mesocycles = () => call<{ mesocycles: MesoSummary[]; active: MesoSummary | null }>(`/api/training/mesocycles`);
+export const mesocycle = (id: string) => call<MesoDetail>(`/api/training/mesocycles/${id}`);
+export const createMesocycle = (date: string, input: { name?: string; weeks: number; template?: string; days?: MesoPlanDay[]; notes?: string }) =>
+  call<{ ok: true; mesocycle: MesoDetail }>(`/api/training/mesocycles?date=${date}`, "POST", input);
+export const updateMesocycle = (id: string, input: { name?: string; notes?: string | null; status?: "completed" | "abandoned" }) =>
+  call<{ ok: true; mesocycle: MesoDetail }>(`/api/training/mesocycles/${id}`, "PATCH", input);
+export const deleteMesocycle = (id: string) => call<{ ok: true }>(`/api/training/mesocycles/${id}`, "DELETE");
+export const currentSession = () => call<{ active: false } | { active: true; session: TrainingSession }>(`/api/training/current`);
+export const session = (mesoId: string, week: number, day: number) =>
+  call<TrainingSession>(`/api/training/mesocycles/${mesoId}/sessions/${week}/${day}`);
+export const completeSession = (mesoId: string, week: number, day: number) =>
+  call<{ ok: true; next: { week: number; day: number; label: string | null } | null; mesoCompleted: boolean }>(
+    `/api/training/mesocycles/${mesoId}/sessions/${week}/${day}/complete`,
+    "POST",
+  );
+export const setFeedback = (mesoId: string, input: Partial<MuscleFeedback> & { week: number; day: number; muscle: string }) =>
+  call<{ ok: true }>(`/api/training/mesocycles/${mesoId}/feedback`, "PUT", input);
+export const updateSet = (id: string, patch: { weightLb?: number | null; reps?: number | null; done?: boolean }) =>
+  call<{ ok: true; set: TrainingSet }>(`/api/training/sets/${id}`, "PATCH", patch);
+export const deleteSet = (id: string) => call<{ ok: true }>(`/api/training/sets/${id}`, "DELETE");
+export const addSet = (slotId: string, week: number) => call<{ ok: true; set: TrainingSet }>(`/api/training/slots/${slotId}/sets`, "POST", { week });
+export const swapExercise = (slotId: string, exerciseId: string, fromWeek: number) =>
+  call<{ ok: true }>(`/api/training/slots/${slotId}`, "PATCH", { exerciseId, fromWeek });
 
 // ---- Apple in-app purchase ----
 // Both routes are exempt from the worker's 402 subscription gate, so an

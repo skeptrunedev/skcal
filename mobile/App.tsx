@@ -17,6 +17,7 @@ import { SignIn } from "./src/SignIn";
 import { Today } from "./src/Today";
 import { Agent } from "./src/Agent";
 import { Body } from "./src/Body";
+import { Train } from "./src/Train";
 import { Drawer, DrawerView } from "./src/Drawer";
 import { Paywall } from "./src/Paywall";
 import { reconcilePendingTransactions, watchTransactions } from "./src/iap";
@@ -49,7 +50,7 @@ const THEME_OPTIONS: { pref: ThemePref; label: string }[] = [
   { pref: "dark", label: "Dark" },
 ];
 
-const TITLES: Record<DrawerView, string> = { today: "Today", body: "Body", coach: "Agent" };
+const TITLES: Record<DrawerView, string> = { today: "Today", body: "Body", train: "Train", coach: "Agent" };
 
 function Shell() {
   const s = useS();
@@ -131,8 +132,8 @@ function Shell() {
     });
   }, [authed]);
 
-  // Android back: close the drawer / avatar menu, then step back from Body or
-  // Agent to Today, before leaving the app.
+  // Android back: close the drawer / avatar menu, then step back from Body,
+  // Train, or Agent to Today, before leaving the app.
   useEffect(() => {
     if (!drawerOpen && !menuOpen && view === "today") return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
@@ -271,6 +272,8 @@ function Shell() {
           />
         ) : view === "body" ? (
           <Body onAuthError={onAuthError} onSubscriptionRequired={HAS_PAYWALL ? () => setBlocked(true) : undefined} />
+        ) : view === "train" ? (
+          <Train onAuthError={onAuthError} onSubscriptionRequired={HAS_PAYWALL ? () => setBlocked(true) : undefined} />
         ) : (
           <Agent
             key={session.key}

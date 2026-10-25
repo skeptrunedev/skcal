@@ -6,9 +6,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeStyles, useTheme } from "./theme";
 import { Conversation } from "./api";
-import { SunIcon, MessageSquareIcon, SquarePenIcon, SearchIcon, TrashIcon, ActivityIcon } from "./icons";
+import { SunIcon, MessageSquareIcon, SquarePenIcon, SearchIcon, TrashIcon, ActivityIcon, DumbbellIcon } from "./icons";
 
-export type DrawerView = "today" | "body" | "coach";
+export type DrawerView = "today" | "body" | "train" | "coach";
 
 // "3m" / "2h" / "5d" ago, matching a compact recents list.
 function relTime(ts: number): string {
@@ -126,6 +126,12 @@ export function Drawer({
           label="Body"
           active={view === "body"}
           onPress={() => onNavigate("body")}
+        />
+        <NavItem
+          icon={<DumbbellIcon size={19} color={view === "train" ? c.amberText : c.muted} />}
+          label="Train"
+          active={view === "train"}
+          onPress={() => onNavigate("train")}
         />
         <NavItem
           icon={<MessageSquareIcon size={19} color={view === "coach" ? c.amberText : c.muted} />}

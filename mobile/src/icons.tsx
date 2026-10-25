@@ -69,3 +69,49 @@ export const ActivityIcon = ({ size, color }: P) => (
     <Path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />
   </Svg>
 );
+
+export const DumbbellIcon = ({ size, color }: P) => (
+  <Svg {...base(size)} stroke={color}>
+    <Path d="M17.596 12.768a2 2 0 1 0 2.829-2.829l-1.768-1.767a2 2 0 0 0 2.828-2.829l-2.828-2.828a2 2 0 0 0-2.829 2.828l-1.767-1.768a2 2 0 1 0-2.829 2.829z" />
+    <Path d="m2.5 21.5 1.4-1.4" />
+    <Path d="m20.1 3.9 1.4-1.4" />
+    <Path d="M5.343 21.485a2 2 0 1 0 2.829-2.828l1.767 1.768a2 2 0 1 0 2.829-2.829l-6.364-6.364a2 2 0 1 0-2.829 2.829l1.768 1.767a2 2 0 0 0-2.828 2.829z" />
+    <Path d="m9.6 14.4 4.8-4.8" />
+  </Svg>
+);
+
+export const CalendarDaysIcon = ({ size, color }: P) => (
+  <Svg {...base(size)} stroke={color}>
+    <Path d="M8 2v4" />
+    <Path d="M16 2v4" />
+    <Rect width={18} height={18} x={3} y={4} rx={2} />
+    <Path d="M3 10h18" />
+    <Path d="M8 14h.01" />
+    <Path d="M12 14h.01" />
+    <Path d="M16 14h.01" />
+    <Path d="M8 18h.01" />
+    <Path d="M12 18h.01" />
+    <Path d="M16 18h.01" />
+  </Svg>
+);
+
+export const MoreVerticalIcon = ({ size, color }: P) => (
+  <Svg {...base(size)} stroke={color}>
+    <Circle cx={12} cy={12} r={1} />
+    <Circle cx={12} cy={5} r={1} />
+    <Circle cx={12} cy={19} r={1} />
+  </Svg>
+);
+
+export const CheckIcon = ({ size, color }: P) => (
+  <Svg {...base(size)} stroke={color}>
+    <Path d="M20 6 9 17l-5-5" />
+  </Svg>
+);
+
+export const PlusIcon = ({ size, color }: P) => (
+  <Svg {...base(size)} stroke={color}>
+    <Path d="M5 12h14" />
+    <Path d="M12 5v14" />
+  </Svg>
+);
