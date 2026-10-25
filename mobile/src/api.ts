@@ -439,6 +439,20 @@ export async function describeWorkout(text: string, date?: string): Promise<void
   if (!r.ok) throw new Error(`describeWorkout → ${r.status}`);
 }
 
+export type Workout = { id: string; summary: string; description: string };
+
+/** The day's workouts, as on the web WorkoutLog card (tz scopes the day). */
+export async function listWorkouts(date: string): Promise<Workout[]> {
+  const r = await req(`/api/workouts?date=${date}&tz=${new Date().getTimezoneOffset()}`);
+  if (!r.ok) return fail(r, "workouts");
+  return r.json() as Promise<Workout[]>;
+}
+
+export async function deleteWorkout(id: string): Promise<void> {
+  const r = await req(`/api/workouts/${id}`, { method: "DELETE" });
+  if (!r.ok) return fail(r, "deleteWorkout");
+}
+
 // ---- Apple in-app purchase ----
 // Both routes are exempt from the worker's 402 subscription gate, so an
 // unsubscribed account can still reach them to buy or restore.

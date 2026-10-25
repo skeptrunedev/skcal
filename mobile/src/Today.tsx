@@ -4,12 +4,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeStyles, useTheme } from "./theme";
 import {
   dashboard, Dashboard, kgToLb, cmToIn, listReminders, deleteReminder, setReminderEnabled, Reminder,
-  listMeals, Meal, todayLocal,
+  listMeals, Meal, todayLocal, listWeight, WeightReading, listWorkouts, Workout,
 } from "./api";
 import { healthSupported, isHealthConnected, connectAppleHealth, syncAppleHealth } from "./health";
 import { XIcon } from "./icons";
 import { WeightChart } from "./WeightChart";
 import { MealsCard } from "./Meals";
+import { WeighInsCard } from "./WeighIns";
+import { WorkoutsCard } from "./Workouts";
 import { MEASUREMENT_SITES, siteLabel } from "./sites";
 import { useContentWidth, COMPACT_WIDTH } from "./layout";
 import { weeklyDeltaLb, weightInsight } from "./weight";
@@ -190,6 +192,8 @@ export function Today({
   const { width, twoColumn } = useContentWidth();
   const [data, setData] = useState<Dashboard | null>(null);
   const [meals, setMeals] = useState<Meal[] | null>(null);
+  const [weights, setWeights] = useState<WeightReading[] | null>(null);
+  const [workouts, setWorkouts] = useState<Workout[] | null>(null);
   const [reminders, setReminders] = useState<{ reminders: Reminder[]; phoneLinked: boolean } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -212,8 +216,24 @@ export function Today({
     }
   }, []);
 
+  const loadWeights = useCallback(async () => {
+    try {
+      setWeights(await listWeight());
+    } catch {
+      setWeights((w) => w ?? []);
+    }
+  }, []);
+
+  const loadWorkouts = useCallback(async () => {
+    try {
+      setWorkouts(await listWorkouts(todayLocal()));
+    } catch {
+      setWorkouts((w) => w ?? []);
+    }
+  }, []);
+
   const load = useCallback(async () => {
-    const side = Promise.all([loadReminders(), loadMeals()]);
+    const side = Promise.all([loadReminders(), loadMeals(), loadWeights(), loadWorkouts()]);
     // Pull new Apple Health samples first (no-op when not connected / not iOS)
     // so a fresh weigh-in shows up in the dashboard fetch below.
     try {
@@ -236,7 +256,7 @@ export function Today({
       else setError(err.message);
     }
     await side;
-  }, [onAuthError, onSubscriptionRequired, loadReminders, loadMeals]);
+  }, [onAuthError, onSubscriptionRequired, loadReminders, loadMeals, loadWeights, loadWorkouts]);
 
   // A meal edit or removal changes both the list and the day's totals.
   const onMealsChanged = useCallback(async () => {
@@ -388,6 +408,9 @@ export function Today({
   );
 
   const mealsCard = <MealsCard meals={meals} onChanged={onMealsChanged} />;
+  // Right after the meals, as on the web Today.
+  const weighInsCard = weights && <WeighInsCard weights={weights} onSaved={loadWeights} />;
+  const workoutsCard = <WorkoutsCard workouts={workouts} onChanged={loadWorkouts} />;
   const remindersCard = reminders && <RemindersCard data={reminders} onChanged={loadReminders} />;
   // Apple Health is an iOS service; Android shows no card rather than naming another platform.
   const healthCard = Platform.OS !== "android" && (
@@ -408,10 +431,12 @@ export function Today({
             {weightCard}
             {ratioCard}
             {measurementsCard}
+            {workoutsCard}
           </View>
           <View style={s.column}>
             {nutritionCard}
             {mealsCard}
+            {weighInsCard}
             {remindersCard}
             {healthCard}
           </View>
@@ -421,8 +446,10 @@ export function Today({
           {weightCard}
           {nutritionCard}
           {mealsCard}
+          {weighInsCard}
           {ratioCard}
           {measurementsCard}
+          {workoutsCard}
           {remindersCard}
           {healthCard}
         </>
