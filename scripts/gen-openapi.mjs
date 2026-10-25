@@ -48,6 +48,8 @@ const options = {
       { name: "Targets", description: "Per-user goals: target weight, calories, and protein." },
       { name: "Coach", description: "AI coach chat grounded in the caller's targets, intake, and weight trend." },
       { name: "Workouts", description: "Free-text and photo workout logging, normalized to platform-standard fields." },
+      { name: "Phases", description: "Goal phases (bulk, cut, maintain) with planned vs actual rate of weight change." },
+      { name: "Training", description: "RP-style mesocycles: volume landmarks, planned sets, logging, feedback, and progression." },
       { name: "Dashboard", description: "Pre-aggregated snapshot powering the home screen." },
       { name: "Account", description: "The signed-in account itself, including permanent deletion." },
       { name: "Ingest", description: "Token-authenticated machine ingest from the Bluetooth scale listener." },
@@ -55,7 +57,7 @@ const options = {
     ],
     security: [{ sessionCookie: [] }, { bearerApiKey: [] }],
   },
-  apis: [resolve(root, "src/worker/index.ts"), resolve(root, "src/db/schema.ts")],
+  apis: [resolve(root, "src/worker/index.ts"), resolve(root, "src/worker/training-routes.ts"), resolve(root, "src/db/schema.ts")],
 };
 
 const spec = swaggerJsdoc(options);

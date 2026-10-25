@@ -442,7 +442,7 @@ const nowMs = sql`(unixepoch() * 1000)`;
  *       type: object
  *       description: Everything the home screen needs in a single response.
  *       additionalProperties: false
- *       required: [weight, targets, measurementsLatest, shoulderToWaist, nutritionToday]
+ *       required: [weight, targets, measurementsLatest, shoulderToWaist, nutritionToday, phase]
  *       properties:
  *         weight:
  *           type: object
@@ -470,6 +470,12 @@ const nowMs = sql`(unixepoch() * 1000)`;
  *             - type: "null"
  *           description: Today's nutrition totals, or null if nothing is logged.
  *           example: { userEmail: nick@mintlify.com, date: "2026-06-29", kcal: 2150, proteinG: 168, hitProtein: true, adherence: on }
+ *         phase:
+ *           oneOf:
+ *             - $ref: '#/components/schemas/Phase'
+ *             - type: "null"
+ *           description: The open goal phase (bulk, cut, or maintain) with its progress, or null when none is set.
+ *           example: null
  *     IngestWeight:
  *       type: object
  *       description: Body for a machine-submitted scale reading.
@@ -1303,4 +1309,152 @@ export const reminders = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
   },
   (t) => [index("reminders_user_idx").on(t.userEmail), index("reminders_next_fire_idx").on(t.enabled, t.nextFireAt)],
+);
+
+// Goal phases: a bulk, cut, or maintenance block with a planned weekly rate of
+// change (% of bodyweight; positive gains, negative loses). At most one phase
+// per user is open (ended_date null); starting a new one closes it. Starting a
+// phase also writes its kcal/protein/goal weight into `targets`, which stays
+// the live source the dashboard and agents read.
+export const phases = sqliteTable(
+  "phases",
+  {
+    id: text("id").primaryKey(), // uuid
+    userEmail: text("user_email").notNull(),
+    kind: text("kind", { enum: ["bulk", "cut", "maintain"] }).notNull(),
+    startDate: text("start_date").notNull(), // YYYY-MM-DD
+    plannedEndDate: text("planned_end_date"), // YYYY-MM-DD
+    endedDate: text("ended_date"), // YYYY-MM-DD once closed; null = the open phase
+    startWeightKg: real("start_weight_kg"),
+    goalWeightKg: real("goal_weight_kg"),
+    ratePctPerWeek: real("rate_pct_per_week"), // e.g. 0.25 = +0.25% bodyweight / week
+    dailyKcalTarget: integer("daily_kcal_target"),
+    proteinTargetG: integer("protein_target_g"),
+    note: text("note"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+  },
+  (t) => [index("phases_user_idx").on(t.userEmail, t.startDate)],
+);
+
+// Mesocycle training, modeled on RP Hypertrophy: a mesocycle is `weeks` long
+// (the last week a deload) and repeats the same `days_per_week` training days
+// each week. A day holds ordered exercise slots (muscle + exercise); sets are
+// materialized per (week, slot) so every week's targets and logged results
+// are plain rows. Built-in exercises live in code (src/worker/training-data);
+// user-created ones go in `exercises`. Weights are pounds.
+export const exercises = sqliteTable(
+  "exercises",
+  {
+    id: text("id").primaryKey(), // "c_" + uuid (built-ins use slugs, not stored)
+    userEmail: text("user_email").notNull(),
+    name: text("name").notNull(),
+    muscle: text("muscle").notNull(), // a MUSCLES key, e.g. "chest"
+    equipment: text("equipment").notNull(), // barbell|dumbbell|machine|cable|bodyweight|smith|band|other
+    videoUrl: text("video_url"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+  },
+  (t) => [index("exercises_user_idx").on(t.userEmail)],
+);
+
+export const mesocycles = sqliteTable(
+  "mesocycles",
+  {
+    id: text("id").primaryKey(), // uuid
+    userEmail: text("user_email").notNull(),
+    name: text("name").notNull(),
+    weeks: integer("weeks").notNull(), // total incl. the final deload week
+    daysPerWeek: integer("days_per_week").notNull(),
+    startDate: text("start_date").notNull(), // YYYY-MM-DD
+    status: text("status", { enum: ["active", "completed", "abandoned"] }).notNull().default("active"),
+    endedDate: text("ended_date"),
+    notes: text("notes"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+  },
+  (t) => [index("mesocycles_user_idx").on(t.userEmail, t.status)],
+);
+
+export const mesoDays = sqliteTable(
+  "meso_days",
+  {
+    id: text("id").primaryKey(), // uuid
+    mesoId: text("meso_id").notNull(),
+    userEmail: text("user_email").notNull(),
+    position: integer("position").notNull(), // 1-based day number within a week
+    label: text("label"), // e.g. "Upper A"
+  },
+  (t) => [index("meso_days_meso_idx").on(t.mesoId)],
+);
+
+export const mesoSlots = sqliteTable(
+  "meso_slots",
+  {
+    id: text("id").primaryKey(), // uuid
+    mesoId: text("meso_id").notNull(),
+    dayId: text("day_id").notNull(),
+    userEmail: text("user_email").notNull(),
+    position: integer("position").notNull(), // order within the day
+    muscle: text("muscle").notNull(),
+    exerciseId: text("exercise_id").notNull(),
+    exerciseName: text("exercise_name").notNull(),
+    equipment: text("equipment").notNull(),
+  },
+  (t) => [index("meso_slots_meso_idx").on(t.mesoId)],
+);
+
+export const mesoSets = sqliteTable(
+  "meso_sets",
+  {
+    id: text("id").primaryKey(), // uuid
+    mesoId: text("meso_id").notNull(),
+    dayId: text("day_id").notNull(),
+    slotId: text("slot_id").notNull(),
+    userEmail: text("user_email").notNull(),
+    week: integer("week").notNull(), // 1-based
+    position: integer("position").notNull(), // set number within the slot
+    muscle: text("muscle").notNull(),
+    exerciseName: text("exercise_name").notNull(),
+    targetReps: integer("target_reps"),
+    targetWeightLb: real("target_weight_lb"),
+    targetRir: integer("target_rir"),
+    weightLb: real("weight_lb"), // logged
+    reps: integer("reps"), // logged
+    loggedAt: integer("logged_at", { mode: "timestamp_ms" }), // null = not done yet
+  },
+  (t) => [index("meso_sets_meso_idx").on(t.mesoId, t.week), index("meso_sets_user_idx").on(t.userEmail, t.loggedAt)],
+);
+
+// Per-muscle feedback for one session (week, day), RP's autoregulation input:
+// soreness is asked before the muscle's first exercise (recovery since last
+// time), pump / joint pain / workload after its last one. 0-3 scales; see
+// FEEDBACK_SCALES in src/worker/training for the answer wording.
+export const mesoFeedback = sqliteTable(
+  "meso_feedback",
+  {
+    mesoId: text("meso_id").notNull(),
+    dayId: text("day_id").notNull(),
+    week: integer("week").notNull(),
+    muscle: text("muscle").notNull(),
+    userEmail: text("user_email").notNull(),
+    soreness: integer("soreness"),
+    pump: integer("pump"),
+    jointPain: integer("joint_pain"),
+    workload: integer("workload"),
+  },
+  (t) => [primaryKey({ columns: [t.mesoId, t.dayId, t.week, t.muscle] })],
+);
+
+// A finished session (week, day). Completing one also writes a `workouts` row
+// (external_id "meso:<meso>:<week>:<day>") so the Today workout log and every
+// agent surface see it like any other workout.
+export const mesoSessions = sqliteTable(
+  "meso_sessions",
+  {
+    mesoId: text("meso_id").notNull(),
+    dayId: text("day_id").notNull(),
+    week: integer("week").notNull(),
+    userEmail: text("user_email").notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+    workoutId: text("workout_id"),
+  },
+  (t) => [primaryKey({ columns: [t.mesoId, t.dayId, t.week] })],
 );

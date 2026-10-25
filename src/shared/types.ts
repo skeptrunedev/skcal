@@ -60,6 +60,32 @@ export type Targets = {
   sex: "male" | "female" | "other" | null;
 };
 
+// A goal phase (bulk / cut / maintain) with planned vs actual weekly rate.
+export type Phase = {
+  id: string;
+  kind: "bulk" | "cut" | "maintain";
+  startDate: string;
+  plannedEndDate: string | null;
+  endedDate: string | null;
+  active: boolean;
+  startWeightLb: number | null;
+  goalWeightLb: number | null;
+  ratePctPerWeek: number | null;
+  dailyKcalTarget: number | null;
+  proteinTargetG: number | null;
+  note: string | null;
+  progress: {
+    weeksElapsed: number;
+    weeksPlanned: number | null;
+    latestWeightLb: number | null;
+    changeLb: number | null;
+    plannedLbPerWeek: number | null;
+    actualLbPerWeek: number | null;
+    actualPctPerWeek: number | null;
+    status: "on_track" | "too_fast" | "too_slow" | "not_enough_data";
+  };
+};
+
 export type DashboardData = {
   weight: {
     latestKg: number | null;
@@ -72,6 +98,7 @@ export type DashboardData = {
   measurementsLatest: { site: string; valueCm: number; ts: number }[];
   shoulderToWaist: number | null;
   nutritionToday: NutritionDay | null;
+  phase: Phase | null;
 };
 
 // Fine-grained API-key scopes (resource:action). An API key holding the special
@@ -85,6 +112,8 @@ export const API_SCOPES = [
   "nutrition:write",
   "targets:read",
   "targets:write",
+  "training:read",
+  "training:write",
   "dashboard:read",
   "agent:read",
   "agent:write",

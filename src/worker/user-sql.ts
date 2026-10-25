@@ -34,6 +34,29 @@ const EXPOSED: Record<string, { columns: string; from: string }> = {
     columns: "id, instruction, hour, minute, days, once_date, tz, enabled, next_fire_at, last_sent_at, created_at",
     from: "main.reminders WHERE user_email = ?1",
   },
+  phases: {
+    columns: "id, kind, start_date, planned_end_date, ended_date, start_weight_kg, goal_weight_kg, rate_pct_per_week, daily_kcal_target, protein_target_g, note, created_at",
+    from: "main.phases WHERE user_email = ?1",
+  },
+  mesocycles: {
+    columns: "id, name, weeks, days_per_week, start_date, status, ended_date, notes, created_at",
+    from: "main.mesocycles WHERE user_email = ?1",
+  },
+  meso_days: { columns: "id, meso_id, position, label", from: "main.meso_days WHERE user_email = ?1" },
+  meso_slots: {
+    columns: "id, meso_id, day_id, position, muscle, exercise_id, exercise_name, equipment",
+    from: "main.meso_slots WHERE user_email = ?1",
+  },
+  meso_sets: {
+    columns: "id, meso_id, day_id, slot_id, week, position, muscle, exercise_name, target_reps, target_weight_lb, target_rir, weight_lb, reps, logged_at",
+    from: "main.meso_sets WHERE user_email = ?1",
+  },
+  meso_feedback: {
+    columns: "meso_id, day_id, week, muscle, soreness, pump, joint_pain, workload",
+    from: "main.meso_feedback WHERE user_email = ?1",
+  },
+  meso_sessions: { columns: "meso_id, day_id, week, completed_at, workout_id", from: "main.meso_sessions WHERE user_email = ?1" },
+  exercises: { columns: "id, name, muscle, equipment, video_url, created_at", from: "main.exercises WHERE user_email = ?1" },
   agent_memories: { columns: "id, content, created_at", from: "main.agent_memories WHERE user_email = ?1" },
   coach_conversations: { columns: "id, title, created_at, updated_at", from: "main.coach_conversations WHERE user_email = ?1" },
   coach_messages: {
@@ -46,6 +69,7 @@ const EXPOSED: Record<string, { columns: string; from: string }> = {
 export const USER_SQL_SCHEMA = [
   ...Object.entries(EXPOSED).map(([t, d]) => `${t}(${d.columns.replace(/\b\w+\.\w+ AS /g, "")})`),
   "Units: weight_kg in kilograms (x 2.2046 for pounds), value_cm/height_cm in centimeters, distance_m in meters, duration_s in seconds, energy_kcal in kcal. ts, created_at, updated_at, started_at, next_fire_at and last_sent_at are Unix epoch MILLISECONDS (UTC); date, target_date, start_date and once_date are local YYYY-MM-DD text. Use date(ts/1000, 'unixepoch') for a UTC day.",
+  "Training: weight_lb / target_weight_lb are POUNDS; logged_at and completed_at are epoch ms (logged_at null = set not done yet). A mesocycle's last week is its deload. meso_days.position and meso_sets.week are 1-based. meso_feedback scales: soreness 0 never sore..3 still sore, pump 0 low..2 amazing, joint_pain 0 none..3 a lot, workload 0 easy..3 too much. exercises holds only the user's custom exercises; built-in ones appear by name in meso_slots / meso_sets. phases.rate_pct_per_week is % bodyweight per week (positive = gain); ended_date null = the open phase.",
 ].join("\n");
 
 export const USER_SQL_MAX_ROWS = 200;

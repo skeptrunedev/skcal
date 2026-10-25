@@ -12,6 +12,24 @@ import { z } from "zod";
 import * as schema from "../db/schema";
 import { isValidTimeZone, localDayInTz, localTimeLineInTz, nextFireAt, offsetMinutesToTz, parseDays, zonedTimeToUtc } from "./reminders";
 import { makeAuth, SMS_ONLY_MESSAGE, smsAllowed, twilioVerify } from "./auth";
+import { trainingRoutes } from "./training-routes";
+import { endPhaseForUser, listPhasesForUser, phaseLine, startPhaseForUser, updatePhaseForUser } from "./phases";
+import {
+  completeSessionForUser,
+  createMesocycleForUser,
+  currentSessionForUser,
+  getMesocycleForUser,
+  getSessionForUser,
+  listExercisesForUser,
+  listMesocyclesForUser,
+  logSetsForUser,
+  setFeedbackForUser,
+  swapExerciseForUser,
+  trainingLines,
+  updateMesocycleForUser,
+} from "./training-store";
+import { MUSCLES, TEMPLATES } from "./training-data";
+import { FEEDBACK_SCALES } from "./training";
 import {
   APPLE_BUNDLE_ID,
   APPLE_PRODUCT_IDS,
@@ -389,7 +407,8 @@ function scopeForRequest(method: string, path: string): string | null {
   if (path.startsWith("/api/weight")) return read ? "weight:read" : "weight:write";
   if (path.startsWith("/api/measurements")) return read ? "measurements:read" : "measurements:write";
   if (path.startsWith("/api/nutrition")) return read ? "nutrition:read" : "nutrition:write";
-  if (path.startsWith("/api/targets")) return read ? "targets:read" : "targets:write";
+  if (path.startsWith("/api/targets") || path.startsWith("/api/phases")) return read ? "targets:read" : "targets:write";
+  if (path.startsWith("/api/training")) return read ? "training:read" : "training:write";
   if (path.startsWith("/api/dashboard") || path === "/api/whoami") return "dashboard:read";
   if (path.startsWith("/api/agent")) return read ? "agent:read" : "agent:write";
   return null;
@@ -1447,6 +1466,7 @@ app.get("/api/dashboard", async (c) => {
     measurementsLatest,
     shoulderToWaist,
     nutritionToday: nutToday[0] ?? null,
+    phase: (await listPhasesForUser(c, email, today)).active,
   };
   return c.json(data);
 });
@@ -2394,10 +2414,13 @@ async function buildCoachSystem(
         ? `7-day average is ${fmtLb(weeklyAvgKg)}; not enough history yet for a week-over-week trend`
         : "no recent weigh-ins to compute a trend";
 
+  const phases = await listPhasesForUser(c, email, today);
+  const training = await trainingLines(c, email);
+
   const localNow = new Date(Date.now() - tzMin * 60_000);
   const nowLine = `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][localNow.getUTCDay()]} ${localNow.toISOString().slice(0, 16).replace("T", " ")}`;
   return [
-    "You are the user's blunt, knowledgeable nutrition coach inside their body-recomposition tracker (a lean cut with a protein floor).",
+    "You are the user's blunt, knowledgeable nutrition and hypertrophy-training coach inside their body-composition tracker.",
     "Answer using THEIR real numbers below — never invent targets or intake.",
     "STYLE, non-negotiable, never use em dashes or colons in your replies, use commas instead. Never open with acknowledgement filler such as 'Got it', 'Understood', 'Sure', 'Noted', 'Done', or 'Great', skip straight to the substantive thing.",
     "",
@@ -2413,6 +2436,13 @@ async function buildCoachSystem(
     `- Logged: ${kcalIn} kcal, ${Math.round(proteinIn)} g protein`,
     `- Remaining budget: ${kcalLeft} kcal, ${Math.round(proteinLeft)} g protein${kcalLeft < 0 ? " (already over on calories)" : ""}`,
     `- Workouts: ${workoutLine}`,
+    "",
+    "GOAL PHASE:",
+    `- ${phaseLine(phases.active)}`,
+    `- Maintenance from their own logs: ${phases.maintenance ? `${phases.maintenance.kcal} kcal/day (${phases.maintenance.days} logged days)` : "not enough logged data yet"}`,
+    "",
+    "TRAINING (RP-style mesocycles):",
+    ...training,
     "",
     "WEIGHT:",
     `- Latest weigh-in: ${fmtLb(latestKg)}`,
@@ -2864,6 +2894,204 @@ const COACH_TOOLS: Anthropic.Beta.BetaTool[] = [
     },
   },
   {
+    name: "get_phases",
+    description: "Read the user's goal phases (bulk, cut, maintain): the open one with planned vs actual weekly rate, past phases, and data-driven maintenance calories.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "start_phase",
+    description:
+      "Start a bulk, cut, or maintenance phase; closes the open one and writes its calories, protein, and goal weight into the targets. Omitted fields default: start weight = latest weigh-in, rate = +0.25 (bulk) / -0.5 (cut) / 0 (maintain) % bodyweight per week, goal = start projected to the planned end, daily kcal = logged maintenance plus the rate's surplus/deficit when there's enough data (see kcalSource in the result).",
+    input_schema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["bulk", "cut", "maintain"], description: "Phase type." },
+        start_date: { type: "string", description: "YYYY-MM-DD or 'today'. Default today." },
+        planned_end_date: { type: "string", description: "Planned last day, YYYY-MM-DD." },
+        goal_weight_lb: { type: "number", description: "Goal bodyweight in pounds." },
+        rate_pct_per_week: { type: "number", description: "Planned weekly change, % of bodyweight (positive = gain)." },
+        daily_kcal: { type: "number", description: "Daily calorie target, when you computed or the user stated one." },
+        protein_g: { type: "number", description: "Daily protein target in grams." },
+        note: { type: "string", description: "Why, in a few words." },
+      },
+      required: ["kind"],
+    },
+  },
+  {
+    name: "update_phase",
+    description: "Edit a phase in place (dates, goal, rate, calories, protein, note). The id is in the GOAL PHASE line or get_phases. Only pass what changes.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Phase id." },
+        start_date: { type: "string", description: "YYYY-MM-DD." },
+        planned_end_date: { type: "string", description: "YYYY-MM-DD, or empty string to clear." },
+        goal_weight_lb: { type: "number", description: "Goal bodyweight in pounds." },
+        rate_pct_per_week: { type: "number", description: "Planned weekly change, % of bodyweight." },
+        daily_kcal: { type: "number", description: "Daily calorie target." },
+        protein_g: { type: "number", description: "Daily protein target in grams." },
+        note: { type: "string", description: "Note." },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "end_phase",
+    description: "End the open phase without starting another (e.g. 'stop the bulk').",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Phase id." },
+        date: { type: "string", description: "Last day, YYYY-MM-DD or 'today'. Default today." },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "list_exercises",
+    description: "List the exercise library (built-in plus the user's custom ones), optionally for one muscle, with ids for create_mesocycle and swap_exercise.",
+    input_schema: {
+      type: "object",
+      properties: { muscle: { type: "string", enum: MUSCLES.map((m) => m.key), description: "Only this muscle." } },
+    },
+  },
+  {
+    name: "create_mesocycle",
+    description:
+      "Plan a new RP-style mesocycle (one can be active at a time). Use a template key, or explicit days of muscle slots (exercise optional, matched by name against the library, else the library default). Templates: " +
+      TEMPLATES.map((t) => `${t.key} (${t.name}, ${t.days.length} days)`).join("; ") +
+      ". Muscles: " +
+      MUSCLES.map((m) => m.key).join(", ") +
+      ".",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Mesocycle name." },
+        weeks: { type: "integer", description: "Total weeks incl. the final deload, 3-8. Default 5." },
+        start_date: { type: "string", description: "YYYY-MM-DD or 'today'. Default today." },
+        template: { type: "string", enum: TEMPLATES.map((t) => t.key), description: "Split template." },
+        days: {
+          type: "array",
+          description: "Explicit days, overriding the template's.",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "Day label, e.g. 'Upper A'." },
+              slots: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    muscle: { type: "string", enum: MUSCLES.map((m) => m.key) },
+                    exercise: { type: "string", description: "Exercise name or id (optional)." },
+                  },
+                  required: ["muscle"],
+                },
+              },
+            },
+            required: ["slots"],
+          },
+        },
+        notes: { type: "string", description: "Notes, e.g. priorities." },
+      },
+    },
+  },
+  {
+    name: "get_training_session",
+    description:
+      "Read a training session with every exercise's sets, targets (weight, reps, RIR), what was logged, last week's numbers, and feedback. Defaults to the active mesocycle's next session due. Pass mesocycle_id + week + day for another one, or overview true for the whole mesocycle (calendar, day plans, weekly sets per muscle vs MEV/MAV/MRV) and the list of all mesocycles.",
+    input_schema: {
+      type: "object",
+      properties: {
+        mesocycle_id: { type: "string", description: "Mesocycle id (default the active one)." },
+        week: { type: "integer", description: "Week number." },
+        day: { type: "integer", description: "Day number." },
+        overview: { type: "boolean", description: "Return the mesocycle overview and list instead of one session." },
+      },
+    },
+  },
+  {
+    name: "log_sets",
+    description:
+      "Log lifted sets for one exercise in the active mesocycle's session (default the next one due): matches the exercise by name or muscle, fills unlogged sets in order, adds sets past the plan. Call once per exercise.",
+    input_schema: {
+      type: "object",
+      properties: {
+        exercise: { type: "string", description: "Exercise as the user said it, e.g. 'bench' or 'lateral raises'." },
+        sets: {
+          type: "array",
+          description: "The sets in order.",
+          items: {
+            type: "object",
+            properties: {
+              weight_lb: { type: "number", description: "Load in pounds; 0 for bodyweight." },
+              reps: { type: "integer", description: "Reps done." },
+            },
+            required: ["reps"],
+          },
+        },
+        week: { type: "integer", description: "Week, only when logging a session other than the next one." },
+        day: { type: "integer", description: "Day, only when logging a session other than the next one." },
+      },
+      required: ["exercise", "sets"],
+    },
+  },
+  {
+    name: "set_muscle_feedback",
+    description:
+      "Record RP feedback for one muscle in a session (default the next session due); it drives next week's set count. Scales (answer index): " +
+      (Object.entries(FEEDBACK_SCALES) as [string, readonly string[]][]).map(([k, v]) => `${k}: ${v.map((a, i) => `${i} ${a}`).join(", ")}`).join("; ") +
+      ".",
+    input_schema: {
+      type: "object",
+      properties: {
+        muscle: { type: "string", enum: MUSCLES.map((m) => m.key) },
+        soreness: { type: "integer", description: "Recovery since the muscle was last trained." },
+        pump: { type: "integer" },
+        joint_pain: { type: "integer" },
+        workload: { type: "integer", description: "How hard the muscle's work felt." },
+        week: { type: "integer", description: "Week (default the next session due)." },
+        day: { type: "integer", description: "Day (default the next session due)." },
+      },
+      required: ["muscle"],
+    },
+  },
+  {
+    name: "complete_session",
+    description: "Finish a training session (default the next one due): logs it as a strength workout and plans the same day next week from the results and feedback.",
+    input_schema: {
+      type: "object",
+      properties: {
+        week: { type: "integer", description: "Week (default the next session due)." },
+        day: { type: "integer", description: "Day (default the next session due)." },
+      },
+    },
+  },
+  {
+    name: "swap_exercise",
+    description: "Replace a slot's exercise for the rest of the mesocycle (slot_id from get_training_session).",
+    input_schema: {
+      type: "object",
+      properties: {
+        slot_id: { type: "string", description: "Slot id." },
+        exercise: { type: "string", description: "New exercise name or id." },
+      },
+      required: ["slot_id", "exercise"],
+    },
+  },
+  {
+    name: "end_mesocycle",
+    description: "End the active mesocycle early, as completed or abandoned.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Mesocycle id." },
+        status: { type: "string", enum: ["completed", "abandoned"] },
+      },
+      required: ["id", "status"],
+    },
+  },
+  {
     name: "list_reminders",
     description: "List the user's reminders (schedule, timezone, enabled state).",
     input_schema: { type: "object", properties: {} },
@@ -3152,6 +3380,97 @@ async function executeCoachTool(
     return await listRemindersForUser(c, email);
   }
 
+  if (name === "get_phases") return await listPhasesForUser(c, email, today);
+
+  if (name === "start_phase" || name === "update_phase") {
+    const day = (v: unknown) => (typeof v === "string" && v ? (resolveToolDate(v, today) ?? v) : v);
+    const fields = {
+      startDate: day(input.start_date),
+      plannedEndDate: day(input.planned_end_date),
+      goalWeightLb: input.goal_weight_lb,
+      ratePctPerWeek: input.rate_pct_per_week,
+      dailyKcal: input.daily_kcal,
+      proteinG: input.protein_g,
+      note: input.note,
+    };
+    if (name === "start_phase") return await startPhaseForUser(c, email, { kind: input.kind, ...fields }, today);
+    const id = String(input.id ?? "").trim();
+    if (!id) return { error: "id required" };
+    return await updatePhaseForUser(c, email, id, fields, today);
+  }
+
+  if (name === "end_phase") {
+    const id = String(input.id ?? "").trim();
+    if (!id) return { error: "id required" };
+    const date = input.date != null ? resolveToolDate(String(input.date), today) : today;
+    if (!date) return { error: "invalid date" };
+    return await endPhaseForUser(c, email, id, date);
+  }
+
+  if (name === "list_exercises") {
+    const muscle = typeof input.muscle === "string" ? input.muscle : undefined;
+    return { exercises: (await listExercisesForUser(c, email, muscle)).map((e) => ({ id: e.id, name: e.name, muscle: e.muscle, equipment: e.equipment })) };
+  }
+
+  if (name === "create_mesocycle") {
+    const startDate = typeof input.start_date === "string" ? (resolveToolDate(input.start_date, today) ?? input.start_date) : undefined;
+    const days = Array.isArray(input.days)
+      ? (input.days as { label?: unknown; slots?: { muscle?: unknown; exercise?: unknown }[] }[]).map((d) => ({
+          label: d.label,
+          slots: (Array.isArray(d.slots) ? d.slots : []).map((sl) => ({ muscle: sl.muscle, exerciseName: sl.exercise, exerciseId: sl.exercise })),
+        }))
+      : undefined;
+    return await createMesocycleForUser(c, email, { name: input.name, weeks: input.weeks, startDate, template: input.template, days, notes: input.notes }, today);
+  }
+
+  if (name === "get_training_session") {
+    if (input.overview) {
+      const list = await listMesocyclesForUser(c, email);
+      const id = typeof input.mesocycle_id === "string" && input.mesocycle_id ? input.mesocycle_id : list.active?.id;
+      return { mesocycles: list.mesocycles.map((m) => ({ id: m.id, name: m.name, status: m.status, startDate: m.startDate, sessionsDone: m.sessionsDone, sessionsTotal: m.sessionsTotal })), detail: id ? await getMesocycleForUser(c, email, id) : null };
+    }
+    if (typeof input.mesocycle_id === "string" && input.mesocycle_id) {
+      return await getSessionForUser(c, email, input.mesocycle_id, input.week != null ? Number(input.week) : undefined, input.day != null ? Number(input.day) : undefined);
+    }
+    const cur = await currentSessionForUser(c, email);
+    if (!cur.active) return { active: false, message: "no active mesocycle" };
+    if (input.week != null || input.day != null)
+      return await getSessionForUser(c, email, cur.session.meso.id, input.week != null ? Number(input.week) : undefined, input.day != null ? Number(input.day) : undefined);
+    const { feedbackScales: _scales, ...session } = cur.session;
+    return session;
+  }
+
+  if (name === "log_sets") return await logSetsForUser(c, email, { exercise: input.exercise, sets: input.sets, week: input.week, day: input.day });
+
+  if (name === "set_muscle_feedback" || name === "complete_session") {
+    const cur = await currentSessionForUser(c, email);
+    if (!cur.active) return { error: "no active mesocycle" };
+    const week = input.week != null ? Number(input.week) : cur.session.week;
+    const day = input.day != null ? Number(input.day) : cur.session.day;
+    if (name === "complete_session") return await completeSessionForUser(c, email, cur.session.meso.id, week, day);
+    return await setFeedbackForUser(c, email, cur.session.meso.id, {
+      week,
+      day,
+      muscle: input.muscle,
+      soreness: input.soreness,
+      pump: input.pump,
+      jointPain: input.joint_pain,
+      workload: input.workload,
+    });
+  }
+
+  if (name === "swap_exercise") {
+    const slotId = String(input.slot_id ?? "").trim();
+    if (!slotId) return { error: "slot_id required" };
+    return await swapExerciseForUser(c, email, slotId, { exerciseId: input.exercise, exerciseName: input.exercise });
+  }
+
+  if (name === "end_mesocycle") {
+    const id = String(input.id ?? "").trim();
+    if (!id) return { error: "id required" };
+    return await updateMesocycleForUser(c, email, id, { status: input.status });
+  }
+
   if (name === "delete_reminder") {
     const id = String(input.id ?? "").trim();
     if (!id) return { error: "id required" };
@@ -3258,7 +3577,7 @@ app.post("/api/agent/stream", async (c) => {
   const today = c.req.query("date") ?? new Date(Date.now() - tzMin * 60_000).toISOString().slice(0, 10);
   const system =
     (await buildCoachSystem(c, email, today, tzMin)) +
-    `\n\nLOGGING JUDGMENT, log immediately when the user states something that happened (a meal eaten, a weigh-in, a workout done), calling the log tool straight away without first checking the log; after logging, reply in one or two short sentences, what you logged with its kcal and protein, then today's total and what's left, and add advice only if the user asked for it; when the conversation is exploratory ("should I eat", "what if", "how many calories are in"), answer first and ask before logging. When the user sends a PHOTO, look at it, food -> describe what you see and log it with log_meal, scale readout -> log_weight, workout screenshot -> log_workout, tape measure -> log_measurement. Tools: you can log meals with log_meal; view and reorganize the food log with list_food_log, move_meal, and move_food_item; clean up mistakes and duplicates with delete_meal and delete_food_item, and when the user corrects an entry ("that was actually 600 kcal", "it was two scoops") fix it in place with edit_food_item instead of deleting and relogging; record body measurements with log_measurement (inches); record weigh-ins with log_weight (pounds); answer questions about weight history (first weigh-in, lb lost per week, what they weighed on a date) with get_weight_history instead of guessing from the summary above; for any other question about their past data that no tool covers (averages, streaks, trends across meals, workouts or measurements), write a read-only query with query_user_data rather than guessing; log workouts from the user's plain description with log_workout (pass their words through); save durable user preferences/facts with remember and remove wrong ones with forget_memory; update daily calorie and protein targets with set_targets. When the user describes their day to day activity, a new job, a change in training volume, or a big lifestyle change, recompute their daily calorie target with Mifflin-St Jeor from the height, sex, and latest weigh-in in the context above, scaled by the closest activity multiplier, 1.2 sedentary, 1.375 lightly active, 1.55 moderately active, 1.725 very active, 1.9 athlete, then apply the deficit or surplus their current goal implies, state the new daily calorie and protein numbers plainly, and call set_targets with them, passing their activity in a few words. When the user states a lasting preference (dislikes yogurt, vegetarian, allergic to nuts), SAVE it — and never suggest foods that conflict with saved memories. REMINDERS, when the user asks to be reminded of something ("remind me to log lunch at noon", "ping me to weigh in on weekday mornings"), create it with set_reminder, and when they correct or adjust one ("no, 9am", "weekdays only") edit it in place with update_reminder using the id from your create result or list_reminders, never create a second one for the same thing. Cancellations use delete_reminder. Reminders DELIVER OVER IMESSAGE, if the tool result says phoneLinked is false, tell the user they won't receive reminder texts until they link their phone in their profile or text the skcal number. If the result says tzDefaulted is true, state the timezone you assumed and ask them to correct it if wrong. After creating one, confirm in plain words what was set, the time and the cadence. Today's date is ${today}. To move / re-date / fix which day food was logged on, first call list_food_log for the relevant day to find the exact meal or item, then move it. IMPORTANT: while calling tools, do NOT write any prose — just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed (item + from day → to day). Never repeat that confirmation.`;
+    `\n\nLOGGING JUDGMENT, log immediately when the user states something that happened (a meal eaten, a weigh-in, a workout done), calling the log tool straight away without first checking the log; after logging, reply in one or two short sentences, what you logged with its kcal and protein, then today's total and what's left, and add advice only if the user asked for it; when the conversation is exploratory ("should I eat", "what if", "how many calories are in"), answer first and ask before logging. When the user sends a PHOTO, look at it, food -> describe what you see and log it with log_meal, scale readout -> log_weight, workout screenshot -> log_workout, tape measure -> log_measurement. Tools: you can log meals with log_meal; view and reorganize the food log with list_food_log, move_meal, and move_food_item; clean up mistakes and duplicates with delete_meal and delete_food_item, and when the user corrects an entry ("that was actually 600 kcal", "it was two scoops") fix it in place with edit_food_item instead of deleting and relogging; record body measurements with log_measurement (inches); record weigh-ins with log_weight (pounds); answer questions about weight history (first weigh-in, lb lost per week, what they weighed on a date) with get_weight_history instead of guessing from the summary above; for any other question about their past data that no tool covers (averages, streaks, trends across meals, workouts or measurements), write a read-only query with query_user_data rather than guessing; log workouts from the user's plain description with log_workout (pass their words through); save durable user preferences/facts with remember and remove wrong ones with forget_memory; update daily calorie and protein targets with set_targets. When the user describes their day to day activity, a new job, a change in training volume, or a big lifestyle change, recompute their daily calorie target with Mifflin-St Jeor from the height, sex, and latest weigh-in in the context above, scaled by the closest activity multiplier, 1.2 sedentary, 1.375 lightly active, 1.55 moderately active, 1.725 very active, 1.9 athlete, then apply the deficit or surplus their current goal implies, state the new daily calorie and protein numbers plainly, and call set_targets with them, passing their activity in a few words. GOAL PHASES, when the user starts a bulk, cut, or maintenance block ("starting a lean bulk", "time to cut till March"), call start_phase (it closes the open phase and writes the targets); typical rates are a bulk at +0.25 to +0.5% bodyweight per week and a cut at -0.5 to -1% per week, so pick from those unless they give one. If the result's kcalSource is unchanged there wasn't enough logged data to estimate maintenance, so compute it with Mifflin-St Jeor as below, add the rate's surplus or deficit (kg per week x 7700 / 7 kcal per day), and call update_phase with daily_kcal. Adjust a phase with update_phase and close it with end_phase; answer "am I gaining too fast" from the GOAL PHASE line or get_phases. TRAINING, mesocycles follow Renaissance Periodization: weekly hard sets per muscle start near MEV and climb toward MRV as feedback allows, reps in reserve fall from 3 to 0 across the accumulation weeks, and the last week is a deload. To plan one, ask only what you need (days per week, muscles to prioritize, weeks with the default 5 including deload, equipment limits), then call create_mesocycle with a template or explicit days; list_exercises shows the library. When an active mesocycle exists and the user reports lifting ("bench 185 for 8, 8 and 7", "did 3 sets of curls with 30s"), log it with log_sets against the session instead of log_workout, then say what's left in the session. Soreness, pump, joint pain, or how hard a muscle's work felt goes to set_muscle_feedback (map their words to the nearest answer). When they say the workout is done, call complete_session, which logs it as a workout and plans next week's same day. Use get_training_session for "what's my workout today" or targets, swap_exercise when they want a different movement, and end_mesocycle to stop one early. When the user states a lasting preference (dislikes yogurt, vegetarian, allergic to nuts), SAVE it — and never suggest foods that conflict with saved memories. REMINDERS, when the user asks to be reminded of something ("remind me to log lunch at noon", "ping me to weigh in on weekday mornings"), create it with set_reminder, and when they correct or adjust one ("no, 9am", "weekdays only") edit it in place with update_reminder using the id from your create result or list_reminders, never create a second one for the same thing. Cancellations use delete_reminder. Reminders DELIVER OVER IMESSAGE, if the tool result says phoneLinked is false, tell the user they won't receive reminder texts until they link their phone in their profile or text the skcal number. If the result says tzDefaulted is true, state the timezone you assumed and ask them to correct it if wrong. After creating one, confirm in plain words what was set, the time and the cadence. Today's date is ${today}. To move / re-date / fix which day food was logged on, first call list_food_log for the relevant day to find the exact meal or item, then move it. IMPORTANT: while calling tools, do NOT write any prose — just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed (item + from day → to day). Never repeat that confirmation.`;
 
   const encoder = new TextEncoder();
   // NDJSON event protocol so the client renders tool calls as real parts rather
@@ -3613,6 +3932,9 @@ async function deleteReminderForUser(c: EnvCtx, email: string, id: string): Prom
   await db(c).delete(schema.reminders).where(eq(schema.reminders.id, id));
   return true;
 }
+
+// Goal phases + mesocycle training (routes in ./training-routes).
+app.route("/", trainingRoutes);
 
 app.post("/api/reminders", async (c) => {
   const email = c.get("email");
@@ -5576,6 +5898,134 @@ function buildMcpServer(c: Context<{ Bindings: Bindings; Variables: Variables }>
       return { isError: true, content: [{ type: "text" as const, text: "Provide either mealId or itemId." }] };
     },
   );
+
+  // Goal phases + mesocycle training: the same operations as the coach tools
+  // (executeCoachTool), so MCP clients and the in-app agent behave alike.
+  const coachTool = (tool: string, readOnly: boolean, title: string, description: string, inputSchema: Record<string, z.ZodTypeAny>) =>
+    server.registerTool(
+      `skcal_${tool}`,
+      {
+        title,
+        description,
+        inputSchema,
+        annotations: readOnly
+          ? { readOnlyHint: true, openWorldHint: false }
+          : { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      },
+      async (args: Record<string, unknown>) => {
+        const result = await executeCoachTool(c, email, tool, args, todayUTC());
+        if (result && typeof result === "object" && "error" in result)
+          return { isError: true, content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+        return ok(result);
+      },
+    );
+  const muscle = z.enum(MUSCLES.map((m) => m.key) as [string, ...string[]]);
+  const dayArg = z.string().optional().describe("YYYY-MM-DD or 'today'.");
+
+  coachTool("get_phases", true, "Goal phases", "Get the user's bulk / cut / maintenance phases with planned vs actual weekly rate, and maintenance calories estimated from their own logs.", {});
+  coachTool(
+    "start_phase",
+    false,
+    "Start a bulk, cut, or maintenance phase",
+    "Start a goal phase; closes the open one and writes its calories, protein, and goal weight into the targets. Omitted: start weight = latest weigh-in, rate = +0.25 / -0.5 / 0 % bodyweight per week, daily kcal = logged maintenance plus the surplus or deficit when there's enough data (kcalSource says).",
+    {
+      kind: z.enum(["bulk", "cut", "maintain"]).describe("Phase type."),
+      start_date: dayArg,
+      planned_end_date: z.string().optional().describe("Planned last day, YYYY-MM-DD."),
+      goal_weight_lb: z.number().optional().describe("Goal bodyweight in pounds."),
+      rate_pct_per_week: z.number().min(-2).max(2).optional().describe("Weekly change, % of bodyweight (positive = gain)."),
+      daily_kcal: z.number().optional().describe("Daily calorie target."),
+      protein_g: z.number().optional().describe("Daily protein target in grams."),
+      note: z.string().max(500).optional().describe("Note."),
+    },
+  );
+  coachTool("update_phase", false, "Edit a phase", "Edit a goal phase in place; pass only what changes.", {
+    id: z.string().describe("Phase id from skcal_get_phases."),
+    start_date: z.string().optional().describe("YYYY-MM-DD."),
+    planned_end_date: z.string().optional().describe("YYYY-MM-DD, or empty to clear."),
+    goal_weight_lb: z.number().optional().describe("Goal bodyweight in pounds."),
+    rate_pct_per_week: z.number().min(-2).max(2).optional().describe("Weekly change, % of bodyweight."),
+    daily_kcal: z.number().optional().describe("Daily calorie target."),
+    protein_g: z.number().optional().describe("Daily protein target in grams."),
+    note: z.string().max(500).optional().describe("Note."),
+  });
+  coachTool("end_phase", false, "End a phase", "End the open goal phase without starting another.", {
+    id: z.string().describe("Phase id."),
+    date: dayArg,
+  });
+  coachTool("list_exercises", true, "Exercise library", "List built-in and custom exercises (id, name, muscle, equipment), optionally for one muscle.", {
+    muscle: muscle.optional().describe("Only this muscle."),
+  });
+  coachTool(
+    "create_mesocycle",
+    false,
+    "Plan a mesocycle",
+    "Create an RP-style hypertrophy mesocycle: weeks incl. a final deload, sets per muscle starting at MEV, RIR 3 falling to 0. Use a template (" +
+      TEMPLATES.map((t) => t.key).join(", ") +
+      ") or explicit days of muscle slots.",
+    {
+      name: z.string().max(80).optional().describe("Name."),
+      weeks: z.number().int().min(3).max(8).optional().describe("Total weeks incl. deload (default 5)."),
+      start_date: dayArg,
+      template: z.enum(TEMPLATES.map((t) => t.key) as [string, ...string[]]).optional().describe("Split template."),
+      days: z
+        .array(
+          z.object({
+            label: z.string().optional().describe("Day label."),
+            slots: z.array(z.object({ muscle, exercise: z.string().optional().describe("Exercise name or id.") })).min(1),
+          }),
+        )
+        .optional()
+        .describe("Explicit days, overriding the template's."),
+      notes: z.string().max(1000).optional().describe("Notes."),
+    },
+  );
+  coachTool(
+    "get_training_session",
+    true,
+    "Training session",
+    "Get a session's exercises, sets, targets (weight / reps / RIR), logged results, last week's numbers, and feedback; defaults to the active mesocycle's next session. overview: true returns the whole mesocycle (calendar, day plans, weekly sets per muscle vs landmarks) and the list of mesocycles.",
+    {
+      mesocycle_id: z.string().optional().describe("Mesocycle id (default the active one)."),
+      week: z.number().int().optional().describe("Week number."),
+      day: z.number().int().optional().describe("Day number."),
+      overview: z.boolean().optional().describe("Return the mesocycle overview instead."),
+    },
+  );
+  coachTool("log_sets", false, "Log sets", "Log lifted sets for one exercise in the active mesocycle's session (default the next due); matched by exercise name or muscle.", {
+    exercise: z.string().describe("Exercise as the user said it, e.g. 'bench'."),
+    sets: z.array(z.object({ weight_lb: z.number().min(0).describe("Pounds; 0 for bodyweight."), reps: z.number().int().min(0).describe("Reps.") })).min(1).max(12),
+    week: z.number().int().optional().describe("Week, for a session other than the next one."),
+    day: z.number().int().optional().describe("Day, for a session other than the next one."),
+  });
+  coachTool(
+    "set_muscle_feedback",
+    false,
+    "Muscle feedback",
+    "Record RP feedback for a muscle in the session (default the next due); drives next week's sets. " +
+      (Object.entries(FEEDBACK_SCALES) as [string, readonly string[]][]).map(([k, v]) => `${k}: ${v.map((a, i) => `${i} ${a}`).join(", ")}`).join("; "),
+    {
+      muscle,
+      soreness: z.number().int().min(0).max(3).optional(),
+      pump: z.number().int().min(0).max(2).optional(),
+      joint_pain: z.number().int().min(0).max(3).optional(),
+      workload: z.number().int().min(0).max(3).optional(),
+      week: z.number().int().optional(),
+      day: z.number().int().optional(),
+    },
+  );
+  coachTool("complete_session", false, "Finish a session", "Finish a session (default the next due): logs it as a workout and plans next week's same day.", {
+    week: z.number().int().optional(),
+    day: z.number().int().optional(),
+  });
+  coachTool("swap_exercise", false, "Swap an exercise", "Replace a slot's exercise for the rest of the mesocycle.", {
+    slot_id: z.string().describe("Slot id from skcal_get_training_session."),
+    exercise: z.string().describe("New exercise name or id."),
+  });
+  coachTool("end_mesocycle", false, "End a mesocycle", "End the active mesocycle early.", {
+    id: z.string().describe("Mesocycle id."),
+    status: z.enum(["completed", "abandoned"]),
+  });
 
   return server;
 }
