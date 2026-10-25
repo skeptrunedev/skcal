@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { workerFetch, workerFetchNoBypass } from "./harness";
+import { getMiniflare, workerFetch, workerFetchNoBypass } from "./harness";
 
 // End-to-end Worker API tests. We drive the REAL Worker in-process (esbuild
 // bundle running inside Miniflare with real D1/R2 — see test/harness.ts), so
@@ -277,6 +277,22 @@ describe("AI guard rails (no model call)", () => {
       messages: { role: string; content: string }[];
     }[];
     expect(list.find((c) => c.id === id)?.messages[1]?.content).toBe(reply);
+  });
+
+  it("lists every conversation past D1's 100-bound-parameter cap", async () => {
+    const email = "many-chats@example.com";
+    const db = await (await getMiniflare()).getD1Database("DB");
+    const stmts = [];
+    for (let i = 0; i < 135; i++) {
+      stmts.push(db.prepare("INSERT INTO coach_conversations (id, user_email, title) VALUES (?1, ?2, ?3)").bind(`many-${i}`, email, `chat ${i}`));
+      stmts.push(db.prepare("INSERT INTO coach_messages (conversation_id, role, content) VALUES (?1, 'user', ?2)").bind(`many-${i}`, `msg ${i}`));
+    }
+    await db.batch(stmts);
+    const res = await asUser(email, "/api/agent/conversations");
+    expect(res.status).toBe(200);
+    const list = (await res.json()) as { id: string; messages: { content: string }[] }[];
+    expect(list).toHaveLength(135);
+    expect(list.find((c) => c.id === "many-0")?.messages[0]?.content).toBe("msg 0");
   });
 
   it("still caps what the user types at 2000 chars", async () => {

@@ -3717,12 +3717,18 @@ app.get("/api/agent/conversations", async (c) => {
     .from(schema.coachConversations)
     .where(eq(schema.coachConversations.userEmail, email))
     .orderBy(desc(schema.coachConversations.updatedAt));
-  const ids = convs.map((x) => x.id);
-  const rows = ids.length
+  // Joined on the owner rather than binding every conversation id: D1 caps a
+  // query at 100 bound parameters, which a long chat history passes.
+  const rows = convs.length
     ? await db(c)
-        .select()
+        .select({
+          conversationId: schema.coachMessages.conversationId,
+          role: schema.coachMessages.role,
+          content: schema.coachMessages.content,
+        })
         .from(schema.coachMessages)
-        .where(inArray(schema.coachMessages.conversationId, ids))
+        .innerJoin(schema.coachConversations, eq(schema.coachMessages.conversationId, schema.coachConversations.id))
+        .where(eq(schema.coachConversations.userEmail, email))
         .orderBy(asc(schema.coachMessages.id))
     : [];
   const byConv = new Map<string, { role: string; content: string | StoredCoachPart[] }[]>();
