@@ -2357,3 +2357,318 @@ a {
   border-top: 1px solid var(--muted);
   opacity: 0.7;
 }
+
+/* ---- Train: RP-style mesocycle workout ------------------------------------ */
+.train-tabs {
+  margin-bottom: 0;
+}
+.train-week {
+  font-size: 1.6rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 0.05rem 0 0.2rem;
+  text-transform: uppercase;
+}
+.train-week span {
+  color: var(--muted);
+  font-weight: 500;
+}
+.train-ex {
+  position: relative;
+  padding-bottom: 0.9rem;
+}
+.train-ex-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.train-muscle {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 6px;
+  padding: 0.18rem 0.42rem;
+}
+.train-rated {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.train-menu-btn {
+  margin-left: auto;
+}
+.train-menu {
+  top: 2.6rem;
+  right: 0.8rem;
+}
+.train-ex-name {
+  font-size: 1.08rem;
+  font-weight: 600;
+  margin: 0.55rem 0 0.1rem;
+}
+.train-ex-equip {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0;
+}
+.train-last {
+  margin: 0.35rem 0 0;
+}
+.train-swap {
+  margin-top: 0.6rem;
+}
+.train-sets {
+  margin-top: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.train-set {
+  display: grid;
+  grid-template-columns: 1.3rem minmax(0, 1fr) minmax(0, 1fr) 2.6rem;
+  gap: 0.5rem;
+  align-items: center;
+}
+.train-set-head span {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  text-align: center;
+}
+.train-set-n {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--dim);
+  text-align: center;
+}
+.train-set input {
+  width: 100%;
+  min-width: 0;
+  background: var(--input-bg);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 0.6rem 0.5rem;
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.train-set input::placeholder {
+  color: var(--dim);
+}
+.train-set input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.train-set.done input {
+  border-color: transparent;
+  background: var(--surface-2);
+}
+.train-log {
+  width: 2.6rem;
+  height: 2.6rem;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  border: 1.5px solid var(--hover-line);
+  background: transparent;
+  color: #1a1205;
+  cursor: pointer;
+  transition: background 150ms var(--ease-out), border-color 150ms var(--ease-out), transform 120ms var(--ease-out);
+}
+.train-log:active {
+  transform: scale(0.94);
+}
+.train-log.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.train-log svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+.train-finish {
+  width: 100%;
+}
+.train-done {
+  text-align: center;
+}
+.train-new,
+.train-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  margin-top: 0.8rem;
+}
+.train-new svg,
+.train-add svg,
+.btn.ghost > svg {
+  width: 1rem;
+  height: 1rem;
+  vertical-align: -0.15em;
+}
+
+/* mesocycle calendar: weeks across, days down */
+.train-cal {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.8rem;
+}
+.train-cal-week {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.train-cal-head {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--fg);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+}
+.train-cal-head small {
+  color: var(--dim);
+  font-size: 0.56rem;
+}
+.train-cal-day {
+  border: 1px solid var(--line);
+  background: var(--input-bg);
+  color: var(--muted);
+  border-radius: 7px;
+  padding: 0.42rem 0;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  cursor: pointer;
+}
+.train-cal-day.done {
+  background: var(--surface-2);
+  color: var(--fg);
+  border-color: var(--hover-line);
+}
+.train-cal-day.at {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* weekly sets per muscle vs MEV / MRV */
+.train-vol {
+  display: grid;
+  gap: 0.45rem 0.3rem;
+  align-items: center;
+  margin: 0.4rem 0 0.6rem;
+}
+.train-vol-h {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  color: var(--dim);
+  text-align: center;
+  text-transform: uppercase;
+}
+.train-vol-m {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.train-vol-n {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92rem;
+}
+.train-vol-n.over {
+  color: var(--attention);
+}
+.train-vol-n.under {
+  color: var(--info);
+}
+.train-vol-r {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--dim);
+  text-align: right;
+}
+.train-plan-ex {
+  font-size: 0.92rem;
+  text-align: right;
+}
+
+/* builder */
+.train-day-label {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.2rem 0;
+  min-width: 0;
+  flex: 1;
+}
+.train-day-label:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.train-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.train-slot {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+.train-slot .select-trigger {
+  font-size: 0.88rem;
+  padding: 0.6rem 0.6rem;
+}
+
+/* feedback sheet */
+.train-fb-q + .train-fb-q {
+  margin-top: 1rem;
+}
+.train-fb-title {
+  font-weight: 600;
+  margin: 0.2rem 0 0.55rem;
+}
+.train-fb-opts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+.train-fb-opt {
+  border: 1px solid var(--line);
+  background: var(--input-bg);
+  color: var(--fg);
+  border-radius: 10px;
+  padding: 0.7rem 0.5rem;
+  font-family: var(--sans);
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+.train-fb-opt.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}

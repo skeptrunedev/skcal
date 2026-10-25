@@ -1,4 +1,15 @@
-import type { DashboardData, NutritionDay, Targets } from "../shared/types";
+import type {
+  DashboardData,
+  MesoDetail,
+  MesoSummary,
+  MuscleFeedback,
+  NutritionDay,
+  Phase,
+  Targets,
+  TrainingLibrary,
+  TrainingSession,
+  TrainingSet,
+} from "../shared/types";
 
 function reauth(): never {
   // Cloudflare Access answered a background fetch with a cross-origin login
@@ -30,6 +41,30 @@ async function jsend(url: string, method: string, body: unknown): Promise<void> 
   });
   if (!r.ok) throw new Error(`${method} ${url} → ${r.status}`);
 }
+
+// JSON request that surfaces the server's { error } message on failure.
+async function jcall<T>(url: string, method: string, body?: unknown): Promise<T> {
+  const r = await rawFetch(url, {
+    method,
+    headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const data = (await r.json().catch(() => ({}))) as T & { error?: string };
+  if (!r.ok) throw new Error(data.error ?? `${method} ${url} → ${r.status}`);
+  return data;
+}
+
+export type PhaseInput = {
+  kind?: Phase["kind"];
+  startDate?: string;
+  plannedEndDate?: string | null;
+  goalWeightLb?: number | null;
+  ratePctPerWeek?: number | null;
+  dailyKcal?: number | null;
+  proteinG?: number | null;
+  note?: string | null;
+};
+export type MesoPlanDay = { label?: string; slots: { muscle: string; exerciseId?: string }[] };
 
 export type Reminder = {
   id: string;
@@ -195,6 +230,37 @@ export const api = {
     return r.json() as Promise<ApiKey & { token: string }>;
   },
   deleteApiKey: (id: string) => jsend(`/api/keys/${id}`, "DELETE", undefined),
+  // ---- goal phases ----
+  phases: (date: string) =>
+    jget<{ active: Phase | null; phases: Phase[]; maintenance: { kcal: number; days: number } | null }>(`/api/phases?date=${date}`),
+  startPhase: (date: string, input: PhaseInput) =>
+    jcall<{ ok: true; phase: Phase; kcalSource: "given" | "estimated" | "unchanged"; maintenanceKcal: number | null }>(`/api/phases?date=${date}`, "POST", input),
+  updatePhase: (id: string, date: string, input: PhaseInput) => jcall<{ ok: true; phase: Phase }>(`/api/phases/${id}?date=${date}`, "PATCH", input),
+  endPhase: (id: string, date: string) => jcall<{ ok: true }>(`/api/phases/${id}/end?date=${date}`, "POST"),
+  // ---- training ----
+  trainingLibrary: () => jget<TrainingLibrary>(`/api/training/library`),
+  mesocycles: () => jget<{ mesocycles: MesoSummary[]; active: MesoSummary | null }>(`/api/training/mesocycles`),
+  mesocycle: (id: string) => jget<MesoDetail>(`/api/training/mesocycles/${id}`),
+  createMesocycle: (date: string, input: { name?: string; weeks: number; template?: string; days?: MesoPlanDay[]; notes?: string }) =>
+    jcall<{ ok: true; mesocycle: MesoDetail }>(`/api/training/mesocycles?date=${date}`, "POST", input),
+  updateMesocycle: (id: string, input: { name?: string; notes?: string | null; status?: "completed" | "abandoned" }) =>
+    jcall<{ ok: true; mesocycle: MesoDetail }>(`/api/training/mesocycles/${id}`, "PATCH", input),
+  deleteMesocycle: (id: string) => jcall<{ ok: true }>(`/api/training/mesocycles/${id}`, "DELETE"),
+  currentSession: () => jget<{ active: false } | { active: true; session: TrainingSession }>(`/api/training/current`),
+  session: (mesoId: string, week: number, day: number) => jget<TrainingSession>(`/api/training/mesocycles/${mesoId}/sessions/${week}/${day}`),
+  completeSession: (mesoId: string, week: number, day: number) =>
+    jcall<{ ok: true; next: { week: number; day: number; label: string | null } | null; mesoCompleted: boolean }>(
+      `/api/training/mesocycles/${mesoId}/sessions/${week}/${day}/complete`,
+      "POST",
+    ),
+  setFeedback: (mesoId: string, input: Partial<MuscleFeedback> & { week: number; day: number; muscle: string }) =>
+    jcall<{ ok: true }>(`/api/training/mesocycles/${mesoId}/feedback`, "PUT", input),
+  updateSet: (id: string, patch: { weightLb?: number | null; reps?: number | null; done?: boolean }) =>
+    jcall<{ ok: true; set: TrainingSet }>(`/api/training/sets/${id}`, "PATCH", patch),
+  deleteSet: (id: string) => jcall<{ ok: true }>(`/api/training/sets/${id}`, "DELETE"),
+  addSet: (slotId: string, week: number) => jcall<{ ok: true; set: TrainingSet }>(`/api/training/slots/${slotId}/sets`, "POST", { week }),
+  swapExercise: (slotId: string, exerciseId: string, fromWeek: number) =>
+    jcall<{ ok: true }>(`/api/training/slots/${slotId}`, "PATCH", { exerciseId, fromWeek }),
   setAvatar: async (file: Blob): Promise<{ image: string }> => {
     const fd = new FormData();
     fd.append("photo", file, "avatar.jpg");

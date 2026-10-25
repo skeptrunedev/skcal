@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sun, MessageSquare, Plus, SquarePen, Search, PanelLeft, PanelLeftOpen, Trash2, ChevronDown, Plug } from "lucide-react";
+import { Sun, Dumbbell, MessageSquare, Plus, SquarePen, Search, PanelLeft, PanelLeftOpen, Trash2, ChevronDown, Plug } from "lucide-react";
 import type { View } from "./BottomNav";
 import type { CoachHistory } from "./Coach";
 import { api } from "./api";
@@ -7,6 +7,7 @@ import { compressImage } from "./image";
 
 const NAV_ICONS: Record<View | "add", React.ReactNode> = {
   today: <Sun />,
+  train: <Dumbbell />,
   coach: <MessageSquare />,
   add: <Plus />,
 };
@@ -131,6 +132,7 @@ export function NavDrawer({
 
         <nav className="nav-items">
           <NavItem icon={NAV_ICONS.today} label="Today" active={view === "today"} onClick={() => onNavigate("today")} />
+          <NavItem icon={NAV_ICONS.train} label="Train" active={view === "train"} onClick={() => onNavigate("train")} />
           <NavItem icon={NAV_ICONS.coach} label="Agent" active={view === "coach"} onClick={() => onNavigate("coach")} />
           <NavItem icon={NAV_ICONS.add} label="Log entry" onClick={onAdd} />
           <NavItem icon={<Plug />} label="Install MCP" onClick={onInstallMcp} />

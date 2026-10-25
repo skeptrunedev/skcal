@@ -15,6 +15,7 @@ import type { Billing } from "./api";
 import { useCoachHistory, CoachThread, type CoachHistory } from "./Coach";
 import type { CoachConversation } from "./api";
 import { SignIn } from "./SignIn";
+import { Train } from "./Train";
 import { useSession, signOut } from "./auth-client";
 
 // We own scroll position per history entry, so stop the browser from guessing.
@@ -70,9 +71,10 @@ function weightLoggedToday(data: DashboardData | null): boolean {
 
 function readView(): View {
   const s = (typeof history !== "undefined" ? history.state : null) as Partial<HistoryState> | null;
-  if (s?.view === "today" || s?.view === "coach") return s.view;
+  if (s?.view === "today" || s?.view === "train" || s?.view === "coach") return s.view;
   const path = typeof location !== "undefined" ? location.pathname : "/";
   if (path.startsWith("/agent")) return "coach";
+  if (path.startsWith("/train")) return "train";
   return "today";
 }
 
@@ -80,7 +82,7 @@ function readView(): View {
 // An open conversation is addressable at /agent/c/:id so refresh/deep links
 // land back in it.
 const viewPath = (v: View, convId: string | null = null) =>
-  v === "coach" ? (convId ? `/agent/c/${encodeURIComponent(convId)}` : "/agent") : "/";
+  v === "coach" ? (convId ? `/agent/c/${encodeURIComponent(convId)}` : "/agent") : v === "train" ? "/train" : "/";
 
 const convIdFromPath = (path: string): string | null => {
   const m = /^\/agent\/c\/([^/]+)/.exec(path);
@@ -228,7 +230,7 @@ export default function App() {
     const onPop = (e: PopStateEvent) => {
       const st = (e.state ?? null) as Partial<HistoryState> | null;
       const next: View =
-        st?.view === "today" || st?.view === "coach" ? st.view : readView();
+        st?.view === "today" || st?.view === "train" || st?.view === "coach" ? st.view : readView();
       swapView(next, st?.scroll ?? 0);
       // Best-effort: sync the open conversation to what the URL points at
       // (plain /agent, or an id no longer in the list, means a fresh chat).
@@ -389,7 +391,7 @@ export default function App() {
           >
             <PanelLeft />
           </button>
-          <span className="topbar-title">{view === "coach" ? "Agent" : "Today"}</span>
+          <span className="topbar-title">{view === "coach" ? "Agent" : view === "train" ? "Train" : "Today"}</span>
           {view === "today" && (
             <button className="nav-icon-btn topbar-add" onClick={() => setAdding(true)} aria-label="Log entry">
               <Plus />
@@ -401,6 +403,7 @@ export default function App() {
           {error && <p className="form-err">{error}</p>}
           {!data && !error && <p className="meta">loading…</p>}
           {data && view === "today" && <Dashboard data={data} date={day} onDateChange={setDay} refreshKey={tick} onChange={reloadAll} />}
+          {data && view === "train" && <Train />}
           {data && view === "coach" && (
             <CoachThread
               key={coach.session.key}

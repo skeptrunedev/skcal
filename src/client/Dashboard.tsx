@@ -1,5 +1,5 @@
 import { kgToLb, cmToIn, SITE_LABELS, MEASUREMENT_SITES } from "../shared/types";
-import type { DashboardData } from "../shared/types";
+import type { DashboardData, Phase } from "../shared/types";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { AreaChart } from "./Chart";
 import { shiftDay, dayLabel, todayLocal } from "./dates";
@@ -7,6 +7,7 @@ import { FoodLog } from "./FoodLog";
 import { WorkoutLog } from "./WorkoutLog";
 import { WeightHistory } from "./WeightHistory";
 import { Reminders } from "./Reminders";
+import { PhaseCard } from "./PhaseCard";
 
 const f1 = (n: number) => n.toFixed(1);
 const DAY = 86_400_000;
@@ -20,12 +21,16 @@ function weeklyDeltaLb(trend: { ts: number; kg: number }[]): number | null {
   return kgToLb(series[series.length - 1].kg) - kgToLb(series[0].kg);
 }
 
-function insight(latestLb: number | null, delta: number | null) {
+// The week's direction read against the goal phase: down is on track in a
+// cut (or with no phase, the default lean cut), up is on track in a bulk.
+function insight(latestLb: number | null, delta: number | null, kind: Phase["kind"] | null) {
   if (latestLb == null) return { head: "Log your first weigh-in", status: null as null | [string, string] };
   if (delta == null) return { head: "Tracking started — keep logging", status: ["info", "NEW"] as [string, string] };
-  if (delta < -0.1) return { head: `Down ${Math.abs(delta).toFixed(1)} lb this week`, status: ["good", "ON TRACK"] as [string, string] };
-  if (delta > 0.1) return { head: `Up ${delta.toFixed(1)} lb this week`, status: ["attention", "WATCH TREND"] as [string, string] };
-  return { head: "Holding steady this week", status: ["info", "STEADY"] as [string, string] };
+  const want = kind === "bulk" ? 1 : kind === "maintain" ? 0 : -1;
+  const dir = delta < -0.1 ? -1 : delta > 0.1 ? 1 : 0;
+  const head = dir < 0 ? `Down ${Math.abs(delta).toFixed(1)} lb this week` : dir > 0 ? `Up ${delta.toFixed(1)} lb this week` : "Holding steady this week";
+  if (dir === 0) return { head, status: ["info", "STEADY"] as [string, string] };
+  return { head, status: (dir === want ? ["good", "ON TRACK"] : ["attention", "WATCH TREND"]) as [string, string] };
 }
 
 export function Dashboard({
@@ -48,7 +53,7 @@ export function Dashboard({
   const goalLb = targets.goalWeightKg != null ? kgToLb(targets.goalWeightKg) : null;
   const startLb = targets.startWeightKg != null ? kgToLb(targets.startWeightKg) : null;
   const delta = weeklyDeltaLb(weight.trend);
-  const ins = insight(latestLb, delta);
+  const ins = insight(latestLb, delta, data.phase?.kind ?? null);
 
   let progressPct: number | null = null;
   if (latestLb != null && goalLb != null && startLb != null && startLb !== goalLb) {
@@ -128,6 +133,8 @@ export function Dashboard({
           </div>
           {weight.note && <p className="note-line">“{weight.note}”</p>}
         </section>
+
+        <PhaseCard phase={data.phase} onChange={onChange} />
 
         {/* NUTRITION + FOOD LOG: one unit so the log always sits directly under the totals */}
         <div className="card-group">

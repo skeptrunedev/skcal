@@ -119,3 +119,81 @@ export const API_SCOPES = [
   "agent:write",
 ] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
+
+// ---- training (RP-style mesocycles), as /api/training returns them ----------
+export type MuscleInfo = {
+  key: string;
+  label: string;
+  mv: number;
+  mev: number;
+  mavLow: number;
+  mavHigh: number;
+  mrv: number;
+  freqLow: number;
+  freqHigh: number;
+  defaultReps: number;
+};
+export type TrainingTemplate = { key: string; name: string; description: string; days: { label: string; muscles: string[] }[] };
+export type Exercise = { id: string; name: string; muscle: string; equipment: string; videoUrl: string | null; custom: boolean };
+export type FeedbackScales = { soreness: string[]; pump: string[]; jointPain: string[]; workload: string[] };
+export type TrainingLibrary = {
+  muscles: MuscleInfo[];
+  equipment: string[];
+  templates: TrainingTemplate[];
+  feedbackScales: FeedbackScales;
+  exercises: Exercise[];
+};
+export type MesoCalendarWeek = { week: number; rir: number | null; deload: boolean; days: { day: number; label: string | null; done: boolean }[] };
+export type MesoSummary = {
+  id: string;
+  name: string;
+  weeks: number;
+  daysPerWeek: number;
+  startDate: string;
+  status: "active" | "completed" | "abandoned";
+  endedDate: string | null;
+  notes: string | null;
+  sessionsDone: number;
+  sessionsTotal: number;
+  next: { week: number; day: number; label: string | null } | null;
+  muscles: string[];
+  calendar: MesoCalendarWeek[];
+};
+export type MesoDetail = MesoSummary & {
+  days: { id: string; day: number; label: string | null; slots: { id: string; muscle: string; exerciseId: string; exerciseName: string; equipment: string }[] }[];
+  volume: { muscle: string; label: string; mev: number | null; mav: [number, number] | null; mrv: number | null; setsByWeek: number[] }[];
+};
+export type TrainingSet = {
+  id: string;
+  position: number;
+  targetReps: number | null;
+  targetWeightLb: number | null;
+  targetRir: number | null;
+  weightLb: number | null;
+  reps: number | null;
+  done: boolean;
+  loggedAt: number | null;
+};
+export type MuscleFeedback = { muscle: string; soreness: number | null; pump: number | null; jointPain: number | null; workload: number | null };
+export type TrainingSession = {
+  meso: { id: string; name: string; weeks: number; daysPerWeek: number; status: string };
+  week: number;
+  day: number;
+  dayId: string;
+  label: string | null;
+  targetRir: number | null;
+  deload: boolean;
+  completed: boolean;
+  completedAt: number | null;
+  exercises: {
+    slotId: string;
+    muscle: string;
+    exerciseId: string;
+    exerciseName: string;
+    equipment: string;
+    sets: TrainingSet[];
+    lastWeek: { weightLb: number | null; reps: number | null }[];
+  }[];
+  feedback: MuscleFeedback[];
+  feedbackScales: FeedbackScales;
+};
