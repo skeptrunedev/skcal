@@ -469,7 +469,7 @@ import { MUSCLES, TEMPLATES } from "./training-data";
  *           type: [integer, "null"]
  *           minimum: 0
  *           maximum: 3
- *           description: 0 easy, 1 pretty good, 2 pushed my limits, 3 too much.
+ *           description: 0 not enough, 1 just right, 2 pushed my limits, 3 too much.
  *           example: 1
  *     LogSetsInput:
  *       type: object

@@ -15,12 +15,13 @@ export const MIN_DAYS = 1;
 export const MAX_DAYS = 7;
 const MAX_SETS_PER_SLOT = 8;
 
-// RP's feedback questions with their answers (0 = first option).
+// RP Hypertrophy's feedback answers, verbatim (0 = first option). Workload is
+// "how was the volume of work (number of hard sets)" for the muscle.
 export const FEEDBACK_SCALES = {
-  soreness: ["Never got sore", "Healed a while ago", "Healed just on time", "I'm still sore"],
+  soreness: ["Never got sore", "Healed a while ago", "Healed just on time", "I'm still sore!"],
   pump: ["Low pump", "Moderate pump", "Amazing pump"],
-  jointPain: ["No pain", "Low pain", "Moderate pain", "A lot of pain"],
-  workload: ["Easy", "Pretty good", "Pushed my limits", "Too much"],
+  jointPain: ["None", "Low pain", "Moderate pain", "A lot of pain"],
+  workload: ["Not enough", "Just right", "Pushed my limits", "Too much"],
 } as const;
 export type FeedbackKey = keyof typeof FEEDBACK_SCALES;
 export type Feedback = { soreness: number | null; pump: number | null; jointPain: number | null; workload: number | null };
@@ -61,8 +62,9 @@ export function initialSetCounts(slots: { id: string; muscle: string }[]): Map<s
 /**
  * Sets to add (or drop) for a muscle on a given day next week, from this
  * week's feedback for it. Mirrors RP's logic: room to recover (never sore /
- * healed early) plus a weak stimulus (low pump or easy workload) earns the
- * most volume; still being sore, "too much", or real joint pain holds or cuts.
+ * healed early) plus a weak stimulus (low pump or "not enough" work) earns
+ * the most volume; still being sore, pushing limits or more, or real joint
+ * pain holds or cuts.
  * No feedback = +1, the default weekly ramp. The caller caps at MRV.
  */
 export function setDelta(fb: Feedback | null): number {
@@ -70,7 +72,8 @@ export function setDelta(fb: Feedback | null): number {
   const { soreness, pump, jointPain, workload } = fb;
   if ((jointPain ?? 0) >= 3) return -1;
   if (soreness === 3 && workload === 3) return -1;
-  if (soreness === 3 || workload === 3 || (jointPain ?? 0) >= 2) return 0;
+  // "Pushed my limits" is RP's ceiling: never add sets past it.
+  if (soreness === 3 || (workload ?? 0) >= 2 || (jointPain ?? 0) >= 2) return 0;
   const recovered = soreness == null || soreness <= 1;
   const weakStimulus = pump === 0 || workload === 0;
   if (recovered && weakStimulus) return 2;

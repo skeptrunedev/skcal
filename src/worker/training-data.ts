@@ -1,7 +1,8 @@
 // Built-in training data: muscle groups with Renaissance Periodization's
 // weekly volume landmarks (hard sets per week), split templates, and the
 // exercise library. Landmark values follow RP's per-muscle "Hypertrophy
-// Training Tips" guides (rpstrength.com, Dr. Mike Israetel):
+// Training Tips" guides as rewritten in Dec 2023 (rpstrength.com, Dr. Mike
+// Israetel), taking the top of each published range:
 //   MV  maintenance volume       MEV minimum effective volume
 //   MAV maximum adaptive volume (a range)   MRV maximum recoverable volume
 // Users can add their own exercises (the `exercises` table); landmarks and
@@ -37,20 +38,20 @@ export type MuscleInfo = {
 };
 
 export const MUSCLES: MuscleInfo[] = [
-  { key: "chest", label: "Chest", mv: 4, mev: 6, mavLow: 12, mavHigh: 20, mrv: 22, freqLow: 1.5, freqHigh: 3, defaultReps: 10 },
-  { key: "back", label: "Back", mv: 6, mev: 10, mavLow: 14, mavHigh: 22, mrv: 25, freqLow: 2, freqHigh: 4, defaultReps: 10 },
-  { key: "quads", label: "Quads", mv: 6, mev: 8, mavLow: 12, mavHigh: 18, mrv: 20, freqLow: 1.5, freqHigh: 3, defaultReps: 10 },
-  { key: "hamstrings", label: "Hamstrings", mv: 3, mev: 4, mavLow: 10, mavHigh: 16, mrv: 20, freqLow: 2, freqHigh: 3, defaultReps: 10 },
-  { key: "glutes", label: "Glutes", mv: 0, mev: 0, mavLow: 4, mavHigh: 12, mrv: 16, freqLow: 2, freqHigh: 3, defaultReps: 12 },
-  { key: "front_delts", label: "Front Delts", mv: 0, mev: 0, mavLow: 6, mavHigh: 8, mrv: 12, freqLow: 1, freqHigh: 2, defaultReps: 10 },
-  { key: "side_delts", label: "Side Delts", mv: 0, mev: 8, mavLow: 16, mavHigh: 22, mrv: 26, freqLow: 2, freqHigh: 6, defaultReps: 15 },
-  { key: "rear_delts", label: "Rear Delts", mv: 0, mev: 8, mavLow: 16, mavHigh: 22, mrv: 26, freqLow: 2, freqHigh: 6, defaultReps: 15 },
-  { key: "biceps", label: "Biceps", mv: 4, mev: 8, mavLow: 14, mavHigh: 20, mrv: 26, freqLow: 2, freqHigh: 6, defaultReps: 12 },
-  { key: "triceps", label: "Triceps", mv: 4, mev: 6, mavLow: 10, mavHigh: 14, mrv: 18, freqLow: 2, freqHigh: 4, defaultReps: 12 },
-  { key: "calves", label: "Calves", mv: 6, mev: 8, mavLow: 12, mavHigh: 16, mrv: 20, freqLow: 2, freqHigh: 4, defaultReps: 12 },
-  { key: "abs", label: "Abs", mv: 0, mev: 0, mavLow: 16, mavHigh: 20, mrv: 25, freqLow: 3, freqHigh: 5, defaultReps: 15 },
-  { key: "traps", label: "Traps", mv: 0, mev: 0, mavLow: 12, mavHigh: 20, mrv: 26, freqLow: 2, freqHigh: 6, defaultReps: 15 },
-  { key: "forearms", label: "Forearms", mv: 0, mev: 2, mavLow: 10, mavHigh: 20, mrv: 25, freqLow: 2, freqHigh: 6, defaultReps: 15 },
+  { key: "chest", label: "Chest", mv: 4, mev: 6, mavLow: 6, mavHigh: 16, mrv: 24, freqLow: 2, freqHigh: 4, defaultReps: 10 },
+  { key: "back", label: "Back", mv: 6, mev: 8, mavLow: 8, mavHigh: 20, mrv: 26, freqLow: 2, freqHigh: 4, defaultReps: 10 },
+  { key: "quads", label: "Quads", mv: 4, mev: 6, mavLow: 6, mavHigh: 14, mrv: 18, freqLow: 2, freqHigh: 5, defaultReps: 10 },
+  { key: "hamstrings", label: "Hamstrings", mv: 2, mev: 4, mavLow: 4, mavHigh: 8, mrv: 14, freqLow: 2, freqHigh: 3, defaultReps: 10 },
+  { key: "glutes", label: "Glutes", mv: 6, mev: 8, mavLow: 8, mavHigh: 24, mrv: 30, freqLow: 2, freqHigh: 5, defaultReps: 12 },
+  { key: "front_delts", label: "Front Delts", mv: 2, mev: 2, mavLow: 4, mavHigh: 8, mrv: 12, freqLow: 2, freqHigh: 3, defaultReps: 10 },
+  { key: "side_delts", label: "Side Delts", mv: 6, mev: 8, mavLow: 8, mavHigh: 24, mrv: 30, freqLow: 3, freqHigh: 6, defaultReps: 15 },
+  { key: "rear_delts", label: "Rear Delts", mv: 4, mev: 4, mavLow: 4, mavHigh: 12, mrv: 20, freqLow: 3, freqHigh: 6, defaultReps: 15 },
+  { key: "biceps", label: "Biceps", mv: 4, mev: 8, mavLow: 8, mavHigh: 20, mrv: 26, freqLow: 3, freqHigh: 6, defaultReps: 12 },
+  { key: "triceps", label: "Triceps", mv: 4, mev: 6, mavLow: 6, mavHigh: 16, mrv: 20, freqLow: 2, freqHigh: 4, defaultReps: 12 },
+  { key: "calves", label: "Calves", mv: 4, mev: 6, mavLow: 6, mavHigh: 16, mrv: 24, freqLow: 3, freqHigh: 6, defaultReps: 12 },
+  { key: "abs", label: "Abs", mv: 4, mev: 4, mavLow: 4, mavHigh: 12, mrv: 20, freqLow: 3, freqHigh: 6, defaultReps: 15 },
+  { key: "traps", label: "Traps", mv: 4, mev: 4, mavLow: 4, mavHigh: 12, mrv: 20, freqLow: 2, freqHigh: 4, defaultReps: 15 },
+  { key: "forearms", label: "Forearms", mv: 4, mev: 8, mavLow: 8, mavHigh: 24, mrv: 30, freqLow: 3, freqHigh: 6, defaultReps: 15 },
 ];
 
 export type Template = { key: string; name: string; description: string; days: { label: string; muscles: Muscle[] }[] };

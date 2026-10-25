@@ -398,11 +398,11 @@ function FeedbackSheet({
 }) {
   const qs =
     when === "before"
-      ? ([["soreness", "How sore did you get after training it last time?"]] as const)
+      ? ([["soreness", "How sore did you get AFTER training it LAST TIME?"]] as const)
       : ([
-          ["pump", "How much of a pump did you get?"],
-          ["jointPain", "Any joint pain?"],
-          ["workload", "How was the workload?"],
+          ["pump", "How much of a pump did you get today?"],
+          ["jointPain", "How did your joints feel?"],
+          ["workload", "How was the volume of work (number of hard sets)?"],
         ] as const);
   const [vals, setVals] = useState<Partial<Record<(typeof qs)[number][0], number>>>(() =>
     Object.fromEntries(qs.flatMap(([k]) => (current?.[k] != null ? [[k, current[k]]] : []))),

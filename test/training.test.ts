@@ -16,12 +16,12 @@ describe("training: RIR schedule", () => {
 describe("training: starting volume", () => {
   it("splits a muscle's MEV across its slots, at least 2 sets each", () => {
     const counts = initialSetCounts([
-      { id: "a", muscle: "back" }, // back MEV 10, two slots → 5 each
+      { id: "a", muscle: "back" }, // back MEV 8, two slots → 4 each
       { id: "b", muscle: "back" },
-      { id: "c", muscle: "glutes" }, // MEV 0 → floor of 2
+      { id: "c", muscle: "front_delts" }, // MEV 2 → floor of 2
     ]);
-    expect(counts.get("a")).toBe(5);
-    expect(counts.get("b")).toBe(5);
+    expect(counts.get("a")).toBe(4);
+    expect(counts.get("b")).toBe(4);
     expect(counts.get("c")).toBe(2);
   });
 });
@@ -30,8 +30,9 @@ describe("training: set progression from feedback", () => {
   const fb = (soreness: number | null, pump: number | null, jointPain: number | null, workload: number | null) => ({ soreness, pump, jointPain, workload });
   it("adds the most when recovered with a weak stimulus", () => expect(setDelta(fb(0, 0, 0, 0))).toBe(2));
   it("adds one when recovered with a good stimulus", () => expect(setDelta(fb(1, 2, 0, 1))).toBe(1));
-  it("holds when still sore or the workload was too much", () => {
+  it("holds when still sore or the workload pushed limits", () => {
     expect(setDelta(fb(3, 1, 0, 1))).toBe(0);
+    expect(setDelta(fb(0, 0, 0, 2))).toBe(0);
     expect(setDelta(fb(1, 1, 0, 3))).toBe(0);
   });
   it("cuts on a lot of joint pain, or still sore with too much work", () => {
@@ -65,7 +66,7 @@ describe("training: planning next week", () => {
         { slotId: "s2", muscle: "chest", equipment: "dumbbell", sets: [set(40, 10), set(40, 10)] },
       ],
       new Map([["chest", { soreness: 0, pump: 0, jointPain: 0, workload: 0 }]]),
-      new Map([["chest", 21]]), // chest MRV 22 → only 1 of the earned 2
+      new Map([["chest", 23]]), // chest MRV 24 → only 1 of the earned 2
       2,
       5,
     );
