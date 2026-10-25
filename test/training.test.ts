@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialSetCounts, nextSetTarget, planNextWeek, rirForWeek, setDelta } from "../src/worker/training";
+import { initialSetCounts, nextSetTarget, planNextWeek, rirForWeek, sessionTiming, setDelta } from "../src/worker/training";
 import { estimateTdee, kcalForRate, phaseProgress } from "../src/worker/phases";
 import { workerFetch } from "./harness";
 
@@ -92,6 +92,21 @@ describe("training: planning next week", () => {
 
 const DAY = 86_400_000;
 const t0 = Date.parse("2026-09-01T12:00:00Z");
+
+describe("training: session timing", () => {
+  it("times rest from the previous set anywhere in the session", () => {
+    const t0 = 1_700_000_000_000;
+    // Set 2 was done first; set 3 isn't done yet.
+    const t = sessionTiming([t0 + 150_000, t0, null, t0 + 330_000]);
+    expect(t.restS).toEqual([150, null, null, 180]);
+    expect(t).toMatchObject({ startedAt: t0, lastSetAt: t0 + 330_000, elapsedS: 330, avgRestS: 165 });
+  });
+  it("leaves rest unknown for sets logged together", () => {
+    const t = sessionTiming([5, 5, 5]);
+    expect(t.restS).toEqual([null, null, null]);
+    expect(t).toMatchObject({ elapsedS: null, avgRestS: null });
+  });
+});
 
 describe("phases: maintenance estimate", () => {
   it("is average intake minus the energy in the weight gained", () => {
@@ -215,6 +230,53 @@ describe("training API", () => {
 
     expect((await as(user, `/api/training/mesocycles/${meso.id}`, { method: "DELETE" })).status).toBe(200);
     expect((await json<{ active: boolean }>(await as(user, "/api/training/current"))).active).toBe(false);
+  });
+});
+
+describe("training API: timing", () => {
+  const user = "timed@example.com";
+
+  it("records when each set was done, the rests between them, and the workout's length", async () => {
+    const created = await as(user, "/api/training/mesocycles", { method: "POST", body: JSON.stringify({ template: "full_body_3", weeks: 4 }) });
+    const mesoId = (await json<{ mesocycle: { id: string } }>(created)).mesocycle.id;
+    type Timed = Session & {
+      progress: { setsDone: number; volumeLb: number; startedAt: number | null; elapsedS: number | null; avgRestS: number | null };
+      exercises: { slotId: string; sets: { id: string; loggedAt: number | null; restS: number | null }[] }[];
+    };
+    const s1 = (await json<{ session: Timed }>(await as(user, "/api/training/current"))).session;
+    const [a, b] = s1.exercises[0].sets;
+    const t0 = Date.now() - 60 * 60_000;
+
+    // One set at a given time, the next 2.5 minutes later.
+    const one = await as(user, `/api/training/sets/${a.id}`, { method: "PATCH", body: JSON.stringify({ weightLb: 100, reps: 10, loggedAt: t0 }) });
+    expect((await json<{ set: { loggedAt: number } }>(one)).set.loggedAt).toBe(t0);
+    await as(user, `/api/training/sets/${b.id}`, { method: "PATCH", body: JSON.stringify({ weightLb: 100, reps: 9, loggedAt: new Date(t0 + 150_000).toISOString() }) });
+
+    // Fixing a done set's numbers keeps when it was done.
+    const fixed = await as(user, `/api/training/sets/${a.id}`, { method: "PATCH", body: JSON.stringify({ weightLb: 105, reps: 10 }) });
+    expect((await json<{ set: { loggedAt: number } }>(fixed)).set.loggedAt).toBe(t0);
+    expect((await as(user, `/api/training/sets/${a.id}`, { method: "PATCH", body: JSON.stringify({ loggedAt: Date.now() + 3_600_000 }) })).status).toBe(400);
+
+    // Sets reported together share one time: their rest is unknown.
+    const second = s1.exercises[1];
+    await as(user, "/api/training/log", { method: "POST", body: JSON.stringify({ slotId: second.slotId, sets: [{ weightLb: 50, reps: 12 }, { weightLb: 50, reps: 12 }] }) });
+
+    const s2 = await json<Timed>(await as(user, `/api/training/mesocycles/${mesoId}/sessions/1/1`));
+    const rests = s2.exercises.slice(0, 2).map((e) => e.sets.filter((x) => x.loggedAt).map((x) => x.restS));
+    expect(rests[0]).toEqual([null, 150]);
+    expect(rests[1][1]).toBeNull();
+    expect(s2.progress).toMatchObject({ setsDone: 4, volumeLb: 105 * 10 + 100 * 9 + 50 * 24, startedAt: t0 });
+
+    // Finishing writes the workout from the first set's time, for first-to-last set.
+    const done = await json<{ completed: { startedAt: number; elapsedS: number } }>(
+      await as(user, `/api/training/mesocycles/${mesoId}/sessions/1/1/complete`, { method: "POST", body: JSON.stringify({ at: Date.now() }) }),
+    );
+    expect(done.completed.startedAt).toBe(t0);
+    const day = new Date(t0).toISOString().slice(0, 10);
+    const workouts = await json<{ startedAt: number | string; durationS: number | null; activityType: string }[]>(await as(user, `/api/workouts?date=${day}`));
+    const w = workouts.find((x) => x.activityType === "strength_training")!;
+    expect(new Date(w.startedAt).getTime()).toBe(t0);
+    expect(w.durationS).toBe(done.completed.elapsedS);
   });
 });
 

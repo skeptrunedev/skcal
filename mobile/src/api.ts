@@ -562,7 +562,8 @@ export type TrainingSet = {
   weightLb: number | null;
   reps: number | null;
   done: boolean;
-  loggedAt: number | null;
+  loggedAt: number | null; // when it was finished, epoch ms
+  restS?: number | null; // seconds since the previous set in the session finished; session reads only
 };
 export type MuscleFeedback = { muscle: string; soreness: number | null; pump: number | null; jointPain: number | null; workload: number | null };
 // askSoreness: the muscle was trained before (an earlier week or day), so its recovery can be asked.
@@ -577,6 +578,16 @@ export type TrainingSession = {
   deload: boolean;
   completed: boolean;
   completedAt: number | null;
+  progress: {
+    setsDone: number;
+    setsPlanned: number;
+    repsDone: number;
+    volumeLb: number;
+    startedAt: number | null;
+    lastSetAt: number | null;
+    elapsedS: number | null;
+    avgRestS: number | null;
+  };
   exercises: {
     slotId: string;
     muscle: string;

@@ -122,7 +122,36 @@ export function deloadSetTarget(prev: SetResult): SetTarget {
   return { targetReps: reps != null ? Math.max(1, Math.round(reps / 2)) : null, targetWeightLb: prev.weightLb ?? prev.targetWeightLb };
 }
 
-export type PlanSlot = { slotId: string; muscle: string; equipment: string; sets: SetResult[] };
+/**
+ * Session timing from each set's completion time (epoch ms, null = not done),
+ * index-aligned with the input. A set's rest is the gap since the previous
+ * set finished anywhere in the session, so it includes the set's own working
+ * time. Sets logged together in one entry share a timestamp, so their rest is
+ * unknown (null) rather than zero. elapsedS runs first set to last set.
+ */
+export function sessionTiming(times: (number | null)[]) {
+  const order = times
+    .map((t, i) => ({ t, i }))
+    .filter((x): x is { t: number; i: number } => x.t != null)
+    .sort((a, b) => a.t - b.t || a.i - b.i);
+  const restS: (number | null)[] = times.map(() => null);
+  for (let k = 1; k < order.length; k++) {
+    const gap = order[k].t - order[k - 1].t;
+    if (gap > 0) restS[order[k].i] = Math.round(gap / 1000);
+  }
+  const rests = restS.filter((r): r is number => r != null);
+  const startedAt = order[0]?.t ?? null;
+  const lastSetAt = order.at(-1)?.t ?? null;
+  return {
+    restS,
+    startedAt,
+    lastSetAt,
+    elapsedS: startedAt != null && lastSetAt != null && lastSetAt > startedAt ? Math.round((lastSetAt - startedAt) / 1000) : null,
+    avgRestS: rests.length ? Math.round(rests.reduce((a, b) => a + b, 0) / rests.length) : null,
+  };
+}
+
+export type PlanSlot ={ slotId: string; muscle: string; equipment: string; sets: SetResult[] };
 
 /**
  * Plan next week's sets for one training day. `weekVolume` is the muscle's

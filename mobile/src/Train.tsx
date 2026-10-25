@@ -28,6 +28,26 @@ type MesoList = { mesocycles: MesoSummary[]; active: MesoSummary | null };
 const label = (lib: TrainingLibrary | null, muscle: string) =>
   lib?.muscles.find((m) => m.key === muscle)?.label ?? muscle.replace(/_/g, " ");
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+const dur = (sec: number) => {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const ss = String(sec % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+};
+// The live rest clock stops counting after this long: the session was left open.
+const REST_CLOCK_MAX_S = 30 * 60;
+
+/** Re-renders every second while `on`, for the live rest clock. */
+function useNow(on: boolean) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!on) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [on]);
+  return now;
+}
 
 export function Train({
   onAuthError,
@@ -183,8 +203,10 @@ function SessionView({
     return false;
   };
 
-  const logged = s.exercises.flatMap((e) => e.sets).filter((x) => x.done).length;
-  const total = s.exercises.flatMap((e) => e.sets).length;
+  const p = s.progress;
+  const live = !s.completed && p.lastSetAt != null && Date.now() - p.lastSetAt < REST_CLOCK_MAX_S * 1000;
+  const now = useNow(live);
+  const resting = live && p.lastSetAt != null ? Math.floor((now - p.lastSetAt) / 1000) : null;
 
   const finish = async () => {
     setBusy(true);
@@ -221,8 +243,17 @@ function SessionView({
         <Text style={st.meta}>
           {s.label ? `${s.label} · ` : ""}
           {s.deload ? "deload week, light and easy" : `${s.targetRir} RIR`}
-          {s.completed ? " · done" : ` · ${logged}/${total} sets`}
+          {s.completed ? " · done" : ` · ${p.setsDone}/${p.setsPlanned} sets`}
         </Text>
+        {p.startedAt != null && (
+          <Text style={st.meta}>
+            {clock(p.startedAt)}
+            {p.elapsedS != null ? ` · ${dur(p.elapsedS)}` : ""}
+            {` · ${p.volumeLb.toLocaleString()} lb`}
+            {p.avgRestS != null ? ` · avg rest ${dur(p.avgRestS)}` : ""}
+          </Text>
+        )}
+        {resting != null && <Text style={st.rest}>Resting {dur(resting)}</Text>}
         {calOpen && <MesoCalendar summary={summary} at={{ week: s.week, day: s.day }} onPick={open} />}
       </View>
 
@@ -252,7 +283,7 @@ function SessionView({
           {busy ? (
             <ActivityIndicator color={c.amberInk} />
           ) : (
-            <Text style={st.btnText}>{logged < total ? `Finish workout · ${total - logged} sets unlogged` : "Finish workout"}</Text>
+            <Text style={st.btnText}>{p.setsDone < p.setsPlanned ? `Finish workout · ${p.setsPlanned - p.setsDone} sets unlogged` : "Finish workout"}</Text>
           )}
         </Pressable>
       ) : (
@@ -440,40 +471,48 @@ function SetRow({
   };
 
   return (
-    <View style={s.setRow}>
-      <Text style={[s.setNum, s.setN]}>{n}</Text>
-      <TextInput
-        style={[s.setInput, s.setCol, set.done && s.setInputDone, Platform.OS === "web" && WEB_NO_RING]}
-        keyboardType="decimal-pad"
-        accessibilityLabel={`Set ${n} weight in pounds`}
-        placeholder={wHint != null ? String(wHint) : "lb"}
-        placeholderTextColor={c.dim}
-        value={w}
-        onChangeText={setW}
-        onBlur={blur}
-        returnKeyType="done"
-      />
-      <TextInput
-        style={[s.setInput, s.setCol, set.done && s.setInputDone, Platform.OS === "web" && WEB_NO_RING]}
-        keyboardType="number-pad"
-        accessibilityLabel={`Set ${n} reps`}
-        placeholder={rHint != null ? String(rHint) : "reps"}
-        placeholderTextColor={c.dim}
-        value={r}
-        onChangeText={setR}
-        onBlur={blur}
-        returnKeyType="done"
-      />
-      <Pressable
-        style={[s.log, s.setLogCol, set.done && s.logOn, busy && s.btnDim]}
-        onPress={toggle}
-        disabled={busy}
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: set.done, busy }}
-        accessibilityLabel={set.done ? `Unlog set ${n}` : `Log set ${n}`}
-      >
-        {set.done && <CheckIcon size={19} color={c.amberInk} />}
-      </Pressable>
+    <View>
+      <View style={s.setRow}>
+        <Text style={[s.setNum, s.setN]}>{n}</Text>
+        <TextInput
+          style={[s.setInput, s.setCol, set.done && s.setInputDone, Platform.OS === "web" && WEB_NO_RING]}
+          keyboardType="decimal-pad"
+          accessibilityLabel={`Set ${n} weight in pounds`}
+          placeholder={wHint != null ? String(wHint) : "lb"}
+          placeholderTextColor={c.dim}
+          value={w}
+          onChangeText={setW}
+          onBlur={blur}
+          returnKeyType="done"
+        />
+        <TextInput
+          style={[s.setInput, s.setCol, set.done && s.setInputDone, Platform.OS === "web" && WEB_NO_RING]}
+          keyboardType="number-pad"
+          accessibilityLabel={`Set ${n} reps`}
+          placeholder={rHint != null ? String(rHint) : "reps"}
+          placeholderTextColor={c.dim}
+          value={r}
+          onChangeText={setR}
+          onBlur={blur}
+          returnKeyType="done"
+        />
+        <Pressable
+          style={[s.log, s.setLogCol, set.done && s.logOn, busy && s.btnDim]}
+          onPress={toggle}
+          disabled={busy}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: set.done, busy }}
+          accessibilityLabel={set.done ? `Unlog set ${n}` : `Log set ${n}`}
+        >
+          {set.done && <CheckIcon size={19} color={c.amberInk} />}
+        </Pressable>
+      </View>
+      {set.loggedAt != null && (
+        <Text style={s.setTime}>
+          {clock(set.loggedAt)}
+          {set.restS != null ? ` · rest ${dur(set.restS)}` : ""}
+        </Text>
+      )}
     </View>
   );
 }
@@ -989,6 +1028,8 @@ const useS = makeStyles((c) =>
     sets: { marginTop: 12, gap: 7 },
     setRow: { flexDirection: "row", alignItems: "center", gap: 8 },
     setN: { width: 20, textAlign: "center" },
+    setTime: { marginLeft: 28, marginTop: 3, color: c.dim, fontSize: 10.5, fontFamily: "monospace", fontVariant: ["tabular-nums"] },
+    rest: { marginTop: 6, color: c.amberText, fontSize: 13, fontFamily: "monospace", fontVariant: ["tabular-nums"] },
     setCol: { flex: 1, minWidth: 0 },
     setLogCol: { width: 44 },
     setHead: { color: c.dim, fontSize: 9.5, fontFamily: "monospace", letterSpacing: 1.2, textAlign: "center" },

@@ -12,6 +12,27 @@ import { Select } from "./Select";
 
 type Tab = "workout" | "plan" | "mesocycles";
 
+const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+const dur = (sec: number) => {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const ss = String(sec % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+};
+// The live rest clock stops counting after this long: the session was left open.
+const REST_CLOCK_MAX_S = 30 * 60;
+
+/** Re-renders every second while `on`, for the live rest clock. */
+function useNow(on: boolean) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!on) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [on]);
+  return now;
+}
+
 const label = (lib: TrainingLibrary | null, muscle: string) =>
   lib?.muscles.find((m) => m.key === muscle)?.label ?? muscle.replace(/_/g, " ");
 
@@ -121,8 +142,10 @@ function SessionView({
     return false;
   };
 
-  const logged = s.exercises.flatMap((e) => e.sets).filter((x) => x.done).length;
-  const total = s.exercises.flatMap((e) => e.sets).length;
+  const p = s.progress;
+  const live = !s.completed && p.lastSetAt != null && Date.now() - p.lastSetAt < REST_CLOCK_MAX_S * 1000;
+  const now = useNow(live);
+  const resting = live && p.lastSetAt != null ? Math.floor((now - p.lastSetAt) / 1000) : null;
 
   async function finish() {
     setBusy(true);
@@ -152,8 +175,17 @@ function SessionView({
         <p className="meta">
           {s.label ? `${s.label} · ` : ""}
           {s.deload ? "deload week, light and easy" : `${s.targetRir} RIR`}
-          {s.completed ? " · done" : ` · ${logged}/${total} sets`}
+          {s.completed ? " · done" : ` · ${p.setsDone}/${p.setsPlanned} sets`}
         </p>
+        {p.startedAt != null && (
+          <p className="meta train-progress">
+            {clock(p.startedAt)}
+            {p.elapsedS != null ? ` · ${dur(p.elapsedS)}` : ""}
+            {` · ${p.volumeLb.toLocaleString()} lb`}
+            {p.avgRestS != null ? ` · avg rest ${dur(p.avgRestS)}` : ""}
+          </p>
+        )}
+        {resting != null && <p className="train-rest">Resting {dur(resting)}</p>}
         {calOpen && <MesoCalendar summary={summary} at={{ week: s.week, day: s.day }} onPick={open} />}
       </section>
 
@@ -180,7 +212,7 @@ function SessionView({
       {err && <p className="form-err">{err}</p>}
       {!s.completed ? (
         <button className="btn train-finish" onClick={finish} disabled={busy}>
-          {busy ? "Saving…" : logged < total ? `Finish workout · ${total - logged} sets unlogged` : "Finish workout"}
+          {busy ? "Saving…" : p.setsDone < p.setsPlanned ? `Finish workout · ${p.setsPlanned - p.setsDone} sets unlogged` : "Finish workout"}
         </button>
       ) : (
         <p className="meta train-done">Completed{s.completedAt ? ` ${new Date(s.completedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}</p>
@@ -377,6 +409,12 @@ function SetRow({
       <button className={`train-log ${set.done ? "on" : ""}`} onClick={toggle} disabled={busy} aria-label={set.done ? `Unlog set ${n}` : `Log set ${n}`} aria-pressed={set.done}>
         {set.done && <Check />}
       </button>
+      {set.loggedAt != null && (
+        <span className="train-set-time">
+          {clock(set.loggedAt)}
+          {set.restS != null ? ` · rest ${dur(set.restS)}` : ""}
+        </span>
+      )}
     </div>
   );
 }

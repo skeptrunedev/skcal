@@ -2471,6 +2471,24 @@ a {
   outline: none;
   border-color: var(--accent);
 }
+.train-set-time {
+  grid-column: 2 / -1;
+  margin-top: -0.2rem;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.train-progress {
+  font-variant-numeric: tabular-nums;
+}
+.train-rest {
+  margin-top: 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
 .train-set.done input {
   border-color: transparent;
   background: var(--surface-2);

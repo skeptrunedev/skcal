@@ -515,6 +515,12 @@ import { MUSCLES, TEMPLATES } from "./training-data";
  *                 type: integer
  *                 description: Reps completed in this set.
  *                 example: 8
+ *               at:
+ *                 type: [string, integer]
+ *                 description: >-
+ *                   When the set was finished, ISO 8601 with offset or epoch ms. Omit for sets done
+ *                   just now; sets sent together without times share one timestamp.
+ *                 example: '2026-10-25T18:42:00-05:00'
  *           example: [{ weightLb: 185, reps: 8 }, { weightLb: 185, reps: 7 }]
  *     SetPatch:
  *       type: object
@@ -541,6 +547,21 @@ import { MUSCLES, TEMPLATES } from "./training-data";
  *           type: [integer, "null"]
  *           description: Target reps.
  *           example: 8
+ *         loggedAt:
+ *           type: [string, integer]
+ *           description: >-
+ *             When the set was finished (ISO 8601 or epoch ms); logs the set at that time. Without
+ *             it, logging stamps now and editing a done set keeps its time.
+ *           example: '2026-10-25T18:42:00-05:00'
+ *     CompleteSessionInput:
+ *       type: object
+ *       description: Optional finish details.
+ *       additionalProperties: false
+ *       properties:
+ *         at:
+ *           type: [string, integer]
+ *           description: When the session finished (ISO 8601 or epoch ms, default now).
+ *           example: '2026-10-25T19:30:00-05:00'
  *     AddSetInput:
  *       type: object
  *       description: Where to add a set.
@@ -1000,7 +1021,12 @@ app.delete("/api/training/mesocycles/:id", async (c) => {
  *   get:
  *     tags: [Training]
  *     summary: Get a session
- *     description: One training session (week + day number) with its exercises, sets, targets, last week's results, and per-muscle feedback. A later week not yet planned is planned on read from the week before.
+ *     description: >-
+ *       One training session (week + day number) with its exercises, sets, targets, last week's
+ *       results, and per-muscle feedback. Each set carries loggedAt (when it was finished, epoch ms)
+ *       and restS (seconds since the previous set in the session finished, null when unknown);
+ *       progress has sets / reps / volume done so far, startedAt, lastSetAt, elapsedS, and
+ *       avgRestS. A later week not yet planned is planned on read from the week before.
  *     operationId: getSession
  *     parameters:
  *       - $ref: '#/components/parameters/TrainingId'
@@ -1038,6 +1064,13 @@ app.get("/api/training/mesocycles/:id/sessions/:week/:day", async (c) => {
  *       - $ref: '#/components/parameters/TrainingId'
  *       - $ref: '#/components/parameters/Week'
  *       - $ref: '#/components/parameters/Day'
+ *     requestBody:
+ *       required: false
+ *       description: Optional, when the session finished if not now.
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CompleteSessionInput'
  *     responses:
  *       '200':
  *         description: The session was completed.
@@ -1051,7 +1084,8 @@ app.get("/api/training/mesocycles/:id/sessions/:week/:day", async (c) => {
  *         $ref: '#/components/responses/NotFound'
  */
 app.post("/api/training/mesocycles/:id/sessions/:week/:day/complete", async (c) => {
-  const r = await completeSessionForUser(c, c.get("email"), c.req.param("id"), Number(c.req.param("week")), Number(c.req.param("day")));
+  const b = await body<{ at?: unknown }>(c);
+  const r = await completeSessionForUser(c, c.get("email"), c.req.param("id"), Number(c.req.param("week")), Number(c.req.param("day")), b.at);
   return reply(c, r);
 });
 

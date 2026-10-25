@@ -19,6 +19,7 @@ import {
   muscleInfo,
   planNextWeek,
   rirForWeek,
+  sessionTiming,
   type Feedback,
   type FeedbackKey,
 } from "./training";
@@ -390,6 +391,10 @@ function sessionOut(L: Loaded, week: number, day: Day) {
   const done = L.sessions.find((s) => s.week === week && s.dayId === day.id);
   const slots = L.slots.filter((s) => s.dayId === day.id);
   const muscles = [...new Set(slots.map((s) => s.muscle))];
+  const sets = L.sets.filter((x) => x.week === week && x.dayId === day.id);
+  const timing = sessionTiming(sets.map((x) => (x.loggedAt ? x.loggedAt.getTime() : null)));
+  const rest = new Map(sets.map((x, i) => [x.id, timing.restS[i]]));
+  const doneSets = sets.filter((x) => x.loggedAt);
   return {
     meso: { id: L.meso.id, name: L.meso.name, weeks: L.meso.weeks, daysPerWeek: L.meso.daysPerWeek, status: L.meso.status },
     week,
@@ -400,6 +405,18 @@ function sessionOut(L: Loaded, week: number, day: Day) {
     deload: isDeload(week, L.meso.weeks),
     completed: !!done,
     completedAt: done ? done.completedAt.getTime() : null,
+    // How much is done so far and how long it's taken, from each set's
+    // completion time.
+    progress: {
+      setsDone: doneSets.length,
+      setsPlanned: sets.length,
+      repsDone: doneSets.reduce((a, x) => a + (x.reps ?? 0), 0),
+      volumeLb: Math.round(doneSets.reduce((a, x) => a + (x.reps ?? 0) * (x.weightLb ?? 0), 0)),
+      startedAt: timing.startedAt,
+      lastSetAt: timing.lastSetAt,
+      elapsedS: timing.elapsedS,
+      avgRestS: timing.avgRestS,
+    },
     exercises: slots.map((s) => {
       const prev = L.sets.filter((x) => x.slotId === s.id && x.week === week - 1);
       return {
@@ -408,7 +425,7 @@ function sessionOut(L: Loaded, week: number, day: Day) {
         exerciseId: s.exerciseId,
         exerciseName: s.exerciseName,
         equipment: s.equipment,
-        sets: L.sets.filter((x) => x.slotId === s.id && x.week === week).map(setOut),
+        sets: sets.filter((x) => x.slotId === s.id).map((x) => ({ ...setOut(x), restS: rest.get(x.id) ?? null })),
         // What they did last week on this slot, for the "last time" hint.
         lastWeek: prev.filter((x) => x.loggedAt).map((x) => ({ weightLb: x.weightLb, reps: x.reps })),
       };
@@ -472,7 +489,18 @@ async function ownedSet(c: Env, email: string, id: string) {
   return (await db(c).select().from(schema.mesoSets).where(and(eq(schema.mesoSets.id, id), eq(schema.mesoSets.userEmail, email))).limit(1))[0];
 }
 
-export type SetPatch = { weightLb?: unknown; reps?: unknown; done?: unknown; targetReps?: unknown; targetWeightLb?: unknown };
+export type SetPatch = { weightLb?: unknown; reps?: unknown; done?: unknown; targetReps?: unknown; targetWeightLb?: unknown; loggedAt?: unknown };
+
+/**
+ * A completion time from epoch ms or an ISO 8601 string. Anything more than
+ * a few minutes in the future (clock skew aside) is a mistake.
+ */
+export function parseLoggedAt(v: unknown): Date | { error: string } {
+  const ms = typeof v === "number" ? v : typeof v === "string" ? Date.parse(v) : NaN;
+  if (!Number.isFinite(ms) || ms < Date.UTC(2000, 0, 1)) return { error: "loggedAt must be epoch ms or an ISO 8601 time" };
+  if (ms > Date.now() + 5 * 60_000) return { error: "loggedAt can't be in the future" };
+  return new Date(ms);
+}
 
 function parseSetPatch(p: SetPatch): Partial<typeof schema.mesoSets.$inferInsert> | { error: string } {
   const out: Partial<typeof schema.mesoSets.$inferInsert> = {};
@@ -493,6 +521,11 @@ function parseSetPatch(p: SetPatch): Partial<typeof schema.mesoSets.$inferInsert
       const r = num(p.targetReps, 1, 100, "targetReps");
       out.targetReps = r == null ? null : Math.round(r);
     }
+    if (p.loggedAt !== undefined) {
+      const at = parseLoggedAt(p.loggedAt);
+      if ("error" in at) return at;
+      out.loggedAt = at;
+    }
   } catch (e) {
     return { error: (e as Error).message };
   }
@@ -500,8 +533,10 @@ function parseSetPatch(p: SetPatch): Partial<typeof schema.mesoSets.$inferInsert
 }
 
 /**
- * Edit or log one set. Logging (done: true, or giving weight + reps without a
- * done flag) stamps logged_at; done: false clears it but keeps the numbers.
+ * Edit or log one set. Logging (done: true, a loggedAt time, or weight + reps
+ * without a done flag) records when it was done: the given loggedAt, else
+ * now on first completion. Editing a done set's numbers keeps its time.
+ * done: false clears it but keeps the numbers.
  */
 export async function updateSetForUser(c: Env, email: string, id: string, patch: SetPatch) {
   const row = await ownedSet(c, email, id);
@@ -509,13 +544,14 @@ export async function updateSetForUser(c: Env, email: string, id: string, patch:
   const f = parseSetPatch(patch);
   if ("error" in f) return f;
   const next = { ...row, ...f };
-  if (patch.done === true || (patch.done === undefined && f.reps != null && next.weightLb != null)) {
+  if (patch.done === false) {
+    if (f.loggedAt) return { error: "loggedAt and done: false conflict" };
+    f.loggedAt = null;
+  } else if (patch.done === true || f.loggedAt || (patch.done === undefined && f.reps != null && next.weightLb != null)) {
     if (next.reps == null) return { error: "reps required to log a set" };
     if (next.weightLb == null) next.weightLb = 0;
     f.weightLb = next.weightLb;
-    f.loggedAt = new Date();
-  } else if (patch.done === false) {
-    f.loggedAt = null;
+    f.loggedAt ??= row.loggedAt ?? new Date();
   }
   if (!Object.keys(f).length) return { error: "nothing to change" };
   const updated = (await db(c).update(schema.mesoSets).set(f).where(eq(schema.mesoSets.id, id)).returning())[0];
@@ -566,7 +602,7 @@ export async function logSetsForUser(
   if (!mesoId) return { error: "no active mesocycle, use log_workout for one-off training" };
   const session = await getSessionForUser(c, email, mesoId, input.week != null ? Number(input.week) : undefined, input.day != null ? Number(input.day) : undefined);
   if ("error" in session) return session;
-  const raw = Array.isArray(input.sets) ? (input.sets as { weight_lb?: unknown; weightLb?: unknown; reps?: unknown }[]) : [];
+  const raw = Array.isArray(input.sets) ? (input.sets as { weight_lb?: unknown; weightLb?: unknown; reps?: unknown; at?: unknown }[]) : [];
   if (!raw.length || raw.length > 12) return { error: "sets must list 1-12 {weight_lb, reps}" };
 
   let ex = session.exercises.find((e) => e.slotId === input.slotId);
@@ -592,8 +628,11 @@ export async function logSetsForUser(
   }
   const open = ex.sets.filter((s) => !s.done);
   const logged = [];
+  // Sets reported together without times share one timestamp, so the rest
+  // between them reads as unknown instead of a few milliseconds.
+  const now = Date.now();
   for (const [i, r] of raw.entries()) {
-    const patch = { weightLb: r.weight_lb ?? r.weightLb ?? 0, reps: r.reps, done: true };
+    const patch = { weightLb: r.weight_lb ?? r.weightLb ?? 0, reps: r.reps, done: true, loggedAt: r.at ?? now };
     let res;
     if (open[i]) res = await updateSetForUser(c, email, open[i].id, patch);
     else {
@@ -646,7 +685,9 @@ export async function setFeedbackForUser(
  * workout log and every agent see it), and plan next week's same day from
  * this week's results and feedback. The last session completes the meso.
  */
-export async function completeSessionForUser(c: Env, email: string, mesoId: string, week: number, dayPos: number) {
+export async function completeSessionForUser(c: Env, email: string, mesoId: string, week: number, dayPos: number, at?: unknown) {
+  const completedAt = at != null ? parseLoggedAt(at) : new Date();
+  if ("error" in completedAt) return { error: completedAt.error.replace("loggedAt", "at") };
   const L = await loadMeso(c, email, mesoId);
   if (!L) return { error: "no mesocycle with that id" };
   const day = L.days.find((d) => d.position === dayPos);
@@ -656,6 +697,7 @@ export async function completeSessionForUser(c: Env, email: string, mesoId: stri
 
   const slots = L.slots.filter((s) => s.dayId === day.id);
   const doneSets = L.sets.filter((s) => s.week === week && s.dayId === day.id && s.loggedAt);
+  const timing = sessionTiming(doneSets.map((s) => s.loggedAt!.getTime()));
   const details = slots
     .map((s) => {
       const sets = doneSets.filter((x) => x.slotId === s.id);
@@ -683,12 +725,13 @@ export async function completeSessionForUser(c: Env, email: string, mesoId: stri
       activityType: "strength_training",
       summary: title.slice(0, 120),
       description: details.length ? details.map((d) => `${d.exercise} ${d.notes}`).join("; ") : `${title}, no sets logged`,
-      startedAt: new Date(),
+      startedAt: timing.startedAt != null ? new Date(timing.startedAt) : completedAt,
+      durationS: timing.elapsedS,
       details: details.length ? JSON.stringify(details) : null,
     })
     .onConflictDoNothing();
-  await db(c).insert(schema.mesoSessions).values({ mesoId, dayId: day.id, week, userEmail: email, workoutId });
-  L.sessions.push({ mesoId, dayId: day.id, week, userEmail: email, completedAt: new Date(), workoutId });
+  await db(c).insert(schema.mesoSessions).values({ mesoId, dayId: day.id, week, userEmail: email, completedAt, workoutId });
+  L.sessions.push({ mesoId, dayId: day.id, week, userEmail: email, completedAt, workoutId });
 
   if (week < L.meso.weeks) await ensureWeek(c, L, week + 1, day);
   let mesoCompleted = false;
@@ -699,7 +742,7 @@ export async function completeSessionForUser(c: Env, email: string, mesoId: stri
   const next = nextSession(L);
   return {
     ok: true as const,
-    completed: { week, day: dayPos, setsLogged: doneSets.length, workoutId },
+    completed: { week, day: dayPos, setsLogged: doneSets.length, workoutId, startedAt: timing.startedAt, completedAt: completedAt.getTime(), elapsedS: timing.elapsedS, avgRestS: timing.avgRestS },
     next: next ? { week: next.week, day: next.day.position, label: next.day.label } : null,
     mesoCompleted,
   };
@@ -783,6 +826,12 @@ export async function trainingLines(c: Env, email: string): Promise<string[]> {
           })
           .join("; "),
     );
+    const p = sess.progress;
+    if (p.startedAt != null) {
+      const ago = (ms: number) => `${Math.round((Date.now() - ms) / 60_000)} min ago`;
+      const avg = p.avgRestS != null ? `, avg rest ${Math.floor(p.avgRestS / 60)}:${String(p.avgRestS % 60).padStart(2, "0")}` : "";
+      lines.push(`- In progress: ${p.setsDone}/${p.setsPlanned} sets, ${p.volumeLb} lb moved, first set ${ago(p.startedAt)}, last set ${ago(p.lastSetAt!)}${avg}`);
+    }
   }
   return lines;
 }

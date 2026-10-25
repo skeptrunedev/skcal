@@ -1608,7 +1608,7 @@
           "Training"
         ],
         "summary": "Get a session",
-        "description": "One training session (week + day number) with its exercises, sets, targets, last week's results, and per-muscle feedback. A later week not yet planned is planned on read from the week before.",
+        "description": "One training session (week + day number) with its exercises, sets, targets, last week's results, and per-muscle feedback. Each set carries loggedAt (when it was finished, epoch ms) and restS (seconds since the previous set in the session finished, null when unknown); progress has sets / reps / volume done so far, startedAt, lastSetAt, elapsedS, and avgRestS. A later week not yet planned is planned on read from the week before.",
         "operationId": "getSession",
         "parameters": [
           {
@@ -1660,6 +1660,17 @@
             "$ref": "#/components/parameters/Day"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "description": "Optional, when the session finished if not now.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteSessionInput"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "The session was completed.",
@@ -2772,6 +2783,14 @@
                   "type": "integer",
                   "description": "Reps completed in this set.",
                   "example": 8
+                },
+                "at": {
+                  "type": [
+                    "string",
+                    "integer"
+                  ],
+                  "description": "When the set was finished, ISO 8601 with offset or epoch ms. Omit for sets done just now; sets sent together without times share one timestamp.",
+                  "example": "2026-10-25T18:42:00-05:00"
                 }
               }
             },
@@ -2829,6 +2848,29 @@
             ],
             "description": "Target reps.",
             "example": 8
+          },
+          "loggedAt": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "When the set was finished (ISO 8601 or epoch ms); logs the set at that time. Without it, logging stamps now and editing a done set keeps its time.",
+            "example": "2026-10-25T18:42:00-05:00"
+          }
+        }
+      },
+      "CompleteSessionInput": {
+        "type": "object",
+        "description": "Optional finish details.",
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "When the session finished (ISO 8601 or epoch ms, default now).",
+            "example": "2026-10-25T19:30:00-05:00"
           }
         }
       },
