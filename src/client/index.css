@@ -2600,6 +2600,9 @@ a {
 .train-vol-n.under {
   color: var(--info);
 }
+.train-vol-n.partial {
+  color: var(--dim);
+}
 .train-vol-r {
   font-family: var(--mono);
   font-size: 0.62rem;
@@ -2671,4 +2674,7 @@ a {
 .train-fb-opt.on {
   border-color: var(--accent);
   color: var(--accent);
+}
+.card > .label + .form {
+  margin-top: 0.85rem;
 }

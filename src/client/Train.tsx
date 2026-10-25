@@ -103,8 +103,8 @@ function SessionView({
     onSession(await api.session(s.meso.id, week, day));
   };
 
-  // RP asks how a muscle recovered right before its first set (from week 2,
-  // or a later day of week 1), and how the work went after its last set.
+  // RP asks how a muscle recovered right before its first set (once it has
+  // been trained before), and how the work went after its last set.
   const afterLog = (next: TrainingSession, muscle: string) => {
     const fb = next.feedback.find((f) => f.muscle === muscle);
     const sets = next.exercises.filter((e) => e.muscle === muscle).flatMap((e) => e.sets);
@@ -114,7 +114,7 @@ function SessionView({
   const beforeLog = (muscle: string, then: () => void): boolean => {
     const fb = s.feedback.find((f) => f.muscle === muscle);
     const started = s.exercises.filter((e) => e.muscle === muscle).some((e) => e.sets.some((x) => x.done));
-    if (!started && fb && fb.soreness == null && (s.week > 1 || s.day > 1)) {
+    if (!started && fb?.askSoreness && fb.soreness == null) {
       setAsk({ muscle, when: "before", then });
       return true;
     }
@@ -508,7 +508,7 @@ function MesoPlan({ id, lib, onEnded }: { id: string; lib: TrainingLibrary | nul
           <p className="label">Weekly sets / muscle</p>
           <span className="meta">MEV · MRV</span>
         </div>
-        <div className="train-vol" style={{ gridTemplateColumns: `minmax(5.5rem, 1fr) repeat(${m.weeks}, 2rem) 3.6rem` }}>
+        <div className="train-vol" style={{ gridTemplateColumns: `minmax(0, 1fr) repeat(${m.weeks}, 1.6rem) 2.6rem` }}>
           <span />
           {m.calendar.map((w) => (
             <span className="train-vol-h" key={w.week}>
@@ -517,7 +517,7 @@ function MesoPlan({ id, lib, onEnded }: { id: string; lib: TrainingLibrary | nul
           ))}
           <span className="train-vol-h">range</span>
           {m.volume.map((v) => (
-            <VolumeRow key={v.muscle} v={v} />
+            <VolumeRow key={v.muscle} v={v} planned={m.weekPlanned} />
           ))}
         </div>
         <p className="meta">weeks plan ahead as you log; sets climb from MEV toward MRV with your feedback</p>
@@ -552,12 +552,17 @@ function MesoPlan({ id, lib, onEnded }: { id: string; lib: TrainingLibrary | nul
   );
 }
 
-function VolumeRow({ v }: { v: MesoDetail["volume"][number] }) {
+// A week still being planned (some days not reached yet) shows its partial
+// count dimmed and isn't judged against the landmarks.
+function VolumeRow({ v, planned }: { v: MesoDetail["volume"][number]; planned: boolean[] }) {
   return (
     <>
       <span className="train-vol-m">{v.label}</span>
       {v.setsByWeek.map((n, i) => (
-        <span key={i} className={`train-vol-n ${v.mrv != null && n > v.mrv ? "over" : v.mev != null && n > 0 && n < v.mev ? "under" : ""}`}>
+        <span
+          key={i}
+          className={`train-vol-n ${!planned[i] ? "partial" : v.mrv != null && n > v.mrv ? "over" : v.mev != null && n > 0 && n < v.mev ? "under" : ""}`}
+        >
           {n || "·"}
         </span>
       ))}

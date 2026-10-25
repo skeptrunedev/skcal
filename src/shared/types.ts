@@ -161,6 +161,7 @@ export type MesoSummary = {
 };
 export type MesoDetail = MesoSummary & {
   days: { id: string; day: number; label: string | null; slots: { id: string; muscle: string; exerciseId: string; exerciseName: string; equipment: string }[] }[];
+  weekPlanned: boolean[];
   volume: { muscle: string; label: string; mev: number | null; mav: [number, number] | null; mrv: number | null; setsByWeek: number[] }[];
 };
 export type TrainingSet = {
@@ -175,6 +176,7 @@ export type TrainingSet = {
   loggedAt: number | null;
 };
 export type MuscleFeedback = { muscle: string; soreness: number | null; pump: number | null; jointPain: number | null; workload: number | null };
+export type SessionFeedback = MuscleFeedback & { askSoreness: boolean };
 export type TrainingSession = {
   meso: { id: string; name: string; weeks: number; daysPerWeek: number; status: string };
   week: number;
@@ -194,6 +196,6 @@ export type TrainingSession = {
     sets: TrainingSet[];
     lastWeek: { weightLb: number | null; reps: number | null }[];
   }[];
-  feedback: MuscleFeedback[];
+  feedback: SessionFeedback[];
   feedbackScales: FeedbackScales;
 };

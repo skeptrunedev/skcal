@@ -125,7 +125,8 @@ export type PlanSlot = { slotId: string; muscle: string; equipment: string; sets
  * Plan next week's sets for one training day. `weekVolume` is the muscle's
  * total sets across the whole current week (all days), so the added sets stop
  * at MRV. Extra sets for a muscle go on its first slot of the day; cuts come
- * off its last slot (never below 1 set). Returns targets per slot.
+ * off its last slot (never below 1 set). A muscle with nothing logged this
+ * week holds its set count. Returns targets per slot.
  */
 export function planNextWeek(
   daySlots: PlanSlot[],
@@ -148,7 +149,9 @@ export function planNextWeek(
   for (const m of muscles) {
     const slots = daySlots.filter((s) => s.muscle === m);
     const mrv = muscleInfo(m)?.mrv ?? 20;
-    let delta = setDelta(feedbackByMuscle.get(m) ?? null);
+    // A muscle skipped this week (nothing logged) holds its volume.
+    const trained = slots.some((s) => s.sets.some((x) => x.reps != null));
+    let delta = trained ? setDelta(feedbackByMuscle.get(m) ?? null) : 0;
     const vol = weekVolume.get(m) ?? 0;
     if (delta > 0) delta = Math.max(0, Math.min(delta, mrv - vol));
     if (delta > 0) {

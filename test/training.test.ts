@@ -73,6 +73,11 @@ describe("training: planning next week", () => {
     expect(plan.get("s2")).toHaveLength(2);
     expect(plan.get("s1")![0]).toEqual({ targetReps: 10, targetWeightLb: 105 });
   });
+  it("holds a skipped muscle's sets", () => {
+    const unlogged = { targetReps: 10, targetWeightLb: null, weightLb: null, reps: null };
+    const plan = planNextWeek([{ slotId: "s1", muscle: "back", equipment: "cable", sets: [unlogged, unlogged] }], new Map(), new Map([["back", 2]]), 2, 5);
+    expect(plan.get("s1")).toHaveLength(2);
+  });
   it("halves sets and reps for the deload", () => {
     const plan = planNextWeek([{ slotId: "s1", muscle: "back", equipment: "cable", sets: [set(100, 10), set(100, 9), set(100, 8)] }], new Map(), new Map(), 5, 5);
     expect(plan.get("s1")).toEqual([

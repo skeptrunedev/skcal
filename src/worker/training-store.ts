@@ -337,6 +337,9 @@ export async function getMesocycleForUser(c: Env, email: string, id: string) {
       label: d.label,
       slots: L.slots.filter((s) => s.dayId === d.id).map((s) => ({ id: s.id, muscle: s.muscle, exerciseId: s.exerciseId, exerciseName: s.exerciseName, equipment: s.equipment })),
     })),
+    // Weeks get planned a day at a time as sessions finish; a week's totals
+    // are only final once every day in it has sets.
+    weekPlanned: Array.from({ length: L.meso.weeks }, (_, i) => L.days.every((d) => L.sets.some((s) => s.week === i + 1 && s.dayId === d.id))),
     // Planned sets per muscle per week, next to its landmarks.
     volume: Object.entries(volume).map(([m, sets]) => {
       const info = muscleInfo(m);
@@ -410,7 +413,13 @@ function sessionOut(L: Loaded, week: number, day: Day) {
         lastWeek: prev.filter((x) => x.loggedAt).map((x) => ({ weightLb: x.weightLb, reps: x.reps })),
       };
     }),
-    feedback: muscles.map((m) => ({ muscle: m, ...feedbackOut(L.feedback.find((f) => f.week === week && f.dayId === day.id && f.muscle === m)) })),
+    feedback: muscles.map((m) => ({
+      muscle: m,
+      ...feedbackOut(L.feedback.find((f) => f.week === week && f.dayId === day.id && f.muscle === m)),
+      // Soreness asks about recovery since the muscle was last trained, so it
+      // only applies once it has been: any earlier week, or an earlier day.
+      askSoreness: week > 1 || L.slots.some((s) => s.muscle === m && (L.days.find((d) => d.id === s.dayId)?.position ?? 0) < day.position),
+    })),
     feedbackScales: FEEDBACK_SCALES,
   };
 }
