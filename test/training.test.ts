@@ -106,6 +106,13 @@ describe("training: session timing", () => {
     expect(t.restS).toEqual([null, null, null]);
     expect(t).toMatchObject({ elapsedS: null, avgRestS: null });
   });
+  it("doesn't call a multi-hour gap a rest period", () => {
+    // Imported histories break a session across days; a 20-hour "rest" would
+    // otherwise dominate the average.
+    const t = sessionTiming([t0, t0 + 120_000, t0 + 20 * 3_600_000, t0 + 20 * 3_600_000 + 90_000]);
+    expect(t.restS).toEqual([null, 120, null, 90]);
+    expect(t.avgRestS).toBe(105);
+  });
 });
 
 describe("phases: maintenance estimate", () => {

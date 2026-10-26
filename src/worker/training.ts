@@ -129,6 +129,11 @@ export function deloadSetTarget(prev: SetResult): SetTarget {
  * time. Sets logged together in one entry share a timestamp, so their rest is
  * unknown (null) rather than zero. elapsedS runs first set to last set.
  */
+// A gap this long isn't a rest period — the lifter left the gym or logged the
+// rest of the session later. Imported histories (RP timestamps span days) make
+// that common, and a 24-hour "rest" would poison the average.
+const BREAK_S = 2 * 60 * 60;
+
 export function sessionTiming(times: (number | null)[]) {
   const order = times
     .map((t, i) => ({ t, i }))
@@ -137,7 +142,7 @@ export function sessionTiming(times: (number | null)[]) {
   const restS: (number | null)[] = times.map(() => null);
   for (let k = 1; k < order.length; k++) {
     const gap = order[k].t - order[k - 1].t;
-    if (gap > 0) restS[order[k].i] = Math.round(gap / 1000);
+    if (gap > 0 && gap <= BREAK_S * 1000) restS[order[k].i] = Math.round(gap / 1000);
   }
   const rests = restS.filter((r): r is number => r != null);
   const startedAt = order[0]?.t ?? null;
