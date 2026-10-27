@@ -1,16 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   View,
   Text,
   TextInput,
   Pressable,
   StyleSheet,
-  ActivityIndicator,
   KeyboardAvoidingView,
+  Linking,
   ScrollView,
 } from "react-native";
 import { makeStyles, useTheme, type Palette } from "./theme";
 import { sendOtp, verifyOtp } from "./api";
+
+// Same pages the paywall links to.
+const PRIVACY_URL = "https://skcal.fit/privacy";
+const TERMS_URL = "https://skcal.fit/terms";
 
 function normalizePhone(input: string): string | null {
   const s = input.replace(/[\s().-]/g, "");
@@ -30,27 +34,45 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [e164, setE164] = useState("");
+  const [throttled, setThrottled] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+
+  // Local cooldown after a rate-limit so retries don't burn more attempts.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((n) => n - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   const send = async () => {
     const n = normalizePhone(phone);
     if (!n) {
-      setError("Enter a valid phone number");
+      setError("Enter a valid phone number (US numbers can skip the +1).");
       return;
     }
     setE164(n);
     setError(null);
+    setThrottled(false);
     setBusy(true);
     try {
       await sendOtp(n);
+      setCode("");
       setStage("code");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if ((e as { status?: number }).status === 429) {
+        setThrottled(true);
+        setError(e instanceof Error && e.message ? e.message : "Too many codes requested for this number — wait about 10 minutes and try again.");
+        setCooldown(60);
+      } else {
+        setError(e instanceof Error ? e.message : "Couldn't send the code. Try again.");
+      }
     } finally {
       setBusy(false);
     }
   };
 
   const verify = async () => {
+    if (code.trim().length < 4) return;
     setError(null);
     setBusy(true);
     try {
@@ -77,7 +99,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
         <Text style={s.brand}>skcal</Text>
         <Text style={s.title}>Sign in</Text>
         <Text style={s.sub}>
-          {stage === "phone" ? "Enter your phone number and we'll text you a code." : `We texted a code to ${e164}.`}
+          {stage === "phone" ? "Enter your phone number and we'll text you a sign-in code." : `We texted a code to ${e164}.`}
         </Text>
         {stage === "phone" ? (
           <>
@@ -91,8 +113,12 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
               onChangeText={setPhone}
               editable={!busy}
             />
-            <Pressable style={[s.btn, busy && s.btnDim]} onPress={send} disabled={busy}>
-              {busy ? <ActivityIndicator color={c.amberInk} /> : <Text style={s.btnText}>Text me a code</Text>}
+            <Pressable
+              style={[s.btn, (busy || cooldown > 0 || !phone.trim()) && s.btnDim]}
+              onPress={send}
+              disabled={busy || cooldown > 0 || !phone.trim()}
+            >
+              <Text style={s.btnText}>{busy ? "Sending…" : cooldown > 0 ? `Wait ${cooldown}s` : "Text me a code"}</Text>
             </Pressable>
           </>
         ) : (
@@ -105,17 +131,34 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
               autoComplete="one-time-code"
               value={code}
               onChangeText={setCode}
+              maxLength={8}
               editable={!busy}
             />
-            <Pressable style={[s.btn, busy && s.btnDim]} onPress={verify} disabled={busy}>
-              {busy ? <ActivityIndicator color={c.amberInk} /> : <Text style={s.btnText}>Sign in</Text>}
+            <Pressable
+              style={[s.btn, (busy || code.trim().length < 4) && s.btnDim]}
+              onPress={verify}
+              disabled={busy || code.trim().length < 4}
+            >
+              <Text style={s.btnText}>{busy ? "Checking…" : "Sign in"}</Text>
             </Pressable>
-            <Pressable onPress={() => setStage("phone")} disabled={busy}>
-              <Text style={s.ghost}>Use a different number</Text>
+            <Pressable
+              style={s.ghostBtn}
+              onPress={() => {
+                setStage("phone");
+                setError(null);
+              }}
+              disabled={busy}
+            >
+              <Text style={s.ghostText}>Use a different number</Text>
             </Pressable>
           </>
         )}
-          {error && <Text style={s.err}>{error}</Text>}
+          {error && <Text style={throttled ? s.warn : s.err}>{error}</Text>}
+          <Text style={s.legal}>
+            <Text style={s.legalLink} onPress={() => Linking.openURL(PRIVACY_URL)} accessibilityRole="link">Privacy</Text>
+            {" · "}
+            <Text style={s.legalLink} onPress={() => Linking.openURL(TERMS_URL)} accessibilityRole="link">Terms</Text>
+          </Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -138,7 +181,11 @@ const useS = makeStyles((C: Palette) =>
   btn: { backgroundColor: C.amber, borderRadius: 12, paddingVertical: 14, alignItems: "center" },
   btnDim: { opacity: 0.6 },
   btnText: { color: C.amberInk, fontWeight: "700", fontSize: 16 },
-  ghost: { color: C.muted, textAlign: "center", marginTop: 14, fontSize: 14 },
+  ghostBtn: { borderWidth: 1, borderColor: C.line, borderRadius: 12, paddingVertical: 13, alignItems: "center", marginTop: 10 },
+  ghostText: { color: C.fg, fontSize: 15, fontWeight: "600" },
   err: { color: C.error, marginTop: 12, fontSize: 14 },
+  warn: { color: C.attention, marginTop: 12, fontSize: 14 },
+  legal: { color: C.muted, fontSize: 12.5, marginTop: 22 },
+  legalLink: { color: C.muted, textDecorationLine: "underline" },
   }),
 );

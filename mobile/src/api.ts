@@ -69,7 +69,8 @@ export async function sendOtp(phoneNumber: string): Promise<void> {
   });
   if (!r.ok) {
     const b = (await r.json().catch(() => ({}))) as { message?: string };
-    throw new Error(b.message ?? `send-otp failed (${r.status})`);
+    // The status rides along so sign-in can tell a rate limit (429) apart.
+    throw Object.assign(new Error(b.message ?? `send-otp failed (${r.status})`), { status: r.status });
   }
 }
 

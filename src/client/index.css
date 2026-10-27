@@ -1881,6 +1881,10 @@ a {
   color: #1a1205;
   white-space: pre-wrap;
 }
+/* The text arrives wrapped in a <p>; its UA margins would double the pill's height. */
+.bubble-user p {
+  margin: 0;
+}
 /* The assistant reply is plain markdown text — no bubble, full width. */
 .bubble-assistant {
   align-self: stretch;
