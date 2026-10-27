@@ -1,14 +1,37 @@
 import { useEffect, useRef, useState } from "react";
 import {
   View, Text, TextInput, Pressable, ScrollView, StyleSheet,
-  Animated, Easing, Alert, AccessibilityInfo, Platform, useWindowDimensions,
+  Animated, Easing, Alert, AccessibilityInfo, Platform, useWindowDimensions, Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { makeStyles, useTheme } from "./theme";
-import { Conversation } from "./api";
-import { SunIcon, MessageSquareIcon, SquarePenIcon, SearchIcon, TrashIcon, ActivityIcon, DumbbellIcon } from "./icons";
+import { makeStyles, useTheme, type ThemePref } from "./theme";
+import { Conversation, photoSource } from "./api";
+import {
+  SunIcon, MessageSquareIcon, SquarePenIcon, SearchIcon, TrashIcon, DumbbellIcon, PlusIcon, PlugIcon, ChevronDownIcon,
+  PanelLeftIcon, BrandMark,
+} from "./icons";
 
-export type DrawerView = "today" | "body" | "train" | "coach";
+export type DrawerView = "today" | "train" | "coach";
+
+const THEME_OPTIONS: { pref: ThemePref; label: string }[] = [
+  { pref: "system", label: "System" },
+  { pref: "light", label: "Light" },
+  { pref: "dark", label: "Dark" },
+];
+
+/** The profile menu's account actions; a null action hides its item. */
+export type AccountActions = {
+  email: string | null;
+  avatar: string | null;
+  uploadingAvatar: boolean;
+  deleting: boolean;
+  onPickAvatar: () => void;
+  onApiKeys: () => void;
+  onLinkedNumbers: () => void;
+  onBilling: (() => void) | null;
+  onSignOut: () => void;
+  onDeleteAccount: () => void;
+};
 
 // "3m" / "2h" / "5d" ago, matching a compact recents list.
 function relTime(ts: number): string {
@@ -31,12 +54,16 @@ function NavItem({ icon, label, active, onPress }: { icon: React.ReactNode; labe
 }
 
 // Left slide-in drawer over a dim scrim — the mobile web app's NavDrawer:
-// brand header, nav links, then the agent history (new chat / search / recents).
+// brand header, nav links, the agent history (new chat / search / recents),
+// and the profile row pinned to the bottom with its account menu.
 export function Drawer({
   open,
   onClose,
   view,
   onNavigate,
+  onAdd,
+  onInstallMcp,
+  account,
   conversations,
   activeId,
   search,
@@ -49,6 +76,9 @@ export function Drawer({
   onClose: () => void;
   view: DrawerView;
   onNavigate: (v: DrawerView) => void;
+  onAdd: () => void;
+  onInstallMcp: () => void;
+  account: AccountActions;
   conversations: Conversation[];
   activeId: string | null;
   search: string;
@@ -58,8 +88,9 @@ export function Drawer({
   onDeleteConversation: (id: string) => void;
 }) {
   const s = useS();
-  const { c } = useTheme();
+  const { c, pref, setPref } = useTheme();
   const insets = useSafeAreaInsets();
+  const [profileMenu, setProfileMenu] = useState(false);
   // Recomputed on rotation; the left inset (cutout or side nav bar in
   // landscape) is padded inside the panel so its contents stay clear of it.
   const { width } = useWindowDimensions();
@@ -74,6 +105,7 @@ export function Drawer({
 
   useEffect(() => {
     if (open) setShown(true);
+    else setProfileMenu(false);
     const anim = Animated.timing(progress, {
       toValue: open ? 1 : 0,
       duration: reduceMotion.current ? 0 : 250,
@@ -112,7 +144,13 @@ export function Drawer({
         ]}
       >
         <View style={s.head}>
-          <Text style={s.brand}>skcal</Text>
+          <View style={s.brandRow}>
+            <BrandMark size={22} />
+            <Text style={s.brand}>skcal</Text>
+          </View>
+          <Pressable style={s.close} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close menu">
+            <PanelLeftIcon size={19} color={c.muted} />
+          </Pressable>
         </View>
 
         <NavItem
@@ -120,12 +158,6 @@ export function Drawer({
           label="Today"
           active={view === "today"}
           onPress={() => onNavigate("today")}
-        />
-        <NavItem
-          icon={<ActivityIcon size={19} color={view === "body" ? c.amberText : c.muted} />}
-          label="Body"
-          active={view === "body"}
-          onPress={() => onNavigate("body")}
         />
         <NavItem
           icon={<DumbbellIcon size={19} color={view === "train" ? c.amberText : c.muted} />}
@@ -139,6 +171,8 @@ export function Drawer({
           active={view === "coach"}
           onPress={() => onNavigate("coach")}
         />
+        <NavItem icon={<PlusIcon size={19} color={c.muted} />} label="Log entry" onPress={onAdd} />
+        <NavItem icon={<PlugIcon size={19} color={c.muted} />} label="Install MCP" onPress={onInstallMcp} />
 
         <View style={s.divider} />
 
@@ -176,8 +210,74 @@ export function Drawer({
             </View>
           ))}
         </ScrollView>
+
+        <View style={s.foot}>
+          {profileMenu && (
+            <View style={s.menu} accessibilityRole="menu">
+              <MenuItem
+                label={account.uploadingAvatar ? "Uploading…" : account.avatar ? "Change photo" : "Add photo"}
+                disabled={account.uploadingAvatar}
+                onPress={account.onPickAvatar}
+              />
+              <MenuItem label="API keys" onPress={() => { setProfileMenu(false); account.onApiKeys(); }} />
+              <MenuItem label="Linked numbers" onPress={() => { setProfileMenu(false); account.onLinkedNumbers(); }} />
+              {account.onBilling && (
+                <MenuItem label="Billing" onPress={() => { setProfileMenu(false); account.onBilling?.(); }} />
+              )}
+              <Text style={s.menuSection}>APPEARANCE</Text>
+              <View style={s.segment} accessibilityRole="radiogroup" accessibilityLabel="Appearance">
+                {THEME_OPTIONS.map((o) => (
+                  <Pressable
+                    key={o.pref}
+                    style={[s.segmentItem, pref === o.pref && s.segmentItemOn]}
+                    onPress={() => setPref(o.pref)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: pref === o.pref }}
+                    accessibilityLabel={`${o.label} appearance`}
+                  >
+                    <Text style={[s.segmentText, pref === o.pref && s.segmentTextOn]}>{o.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={s.menuDivider} />
+              <MenuItem label="Sign out" onPress={() => { setProfileMenu(false); account.onSignOut(); }} />
+              <MenuItem
+                label={account.deleting ? "Deleting…" : "Delete account"}
+                danger
+                disabled={account.deleting}
+                onPress={account.onDeleteAccount}
+              />
+            </View>
+          )}
+          <Pressable
+            style={s.profileRow}
+            onPress={() => setProfileMenu((v) => !v)}
+            accessibilityRole="button"
+            accessibilityLabel="Account"
+            accessibilityState={{ expanded: profileMenu }}
+          >
+            <View style={s.avatar}>
+              {account.avatar ? (
+                <Image source={photoSource(account.avatar)} style={s.avatarImg} />
+              ) : (
+                <Text style={s.avatarText}>{account.email?.[0]?.toUpperCase() ?? "·"}</Text>
+              )}
+            </View>
+            <Text style={s.profileEmail} numberOfLines={1}>{account.email ?? "…"}</Text>
+            <ChevronDownIcon size={16} color={c.muted} />
+          </Pressable>
+        </View>
       </Animated.View>
     </View>
+  );
+}
+
+function MenuItem({ label, onPress, disabled, danger }: { label: string; onPress: () => void; disabled?: boolean; danger?: boolean }) {
+  const s = useS();
+  return (
+    <Pressable style={s.menuItem} onPress={onPress} disabled={disabled} accessibilityRole="menuitem">
+      <Text style={[s.menuItemText, danger && s.menuItemDanger]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -192,7 +292,9 @@ const useS = makeStyles((c) =>
     backgroundColor: c.bg, paddingHorizontal: 10,
     borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: c.line,
   },
-  head: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingVertical: 8 },
+  head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingLeft: 8, paddingVertical: 4 },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  close: { width: 38, height: 38, alignItems: "center", justifyContent: "center", borderRadius: 8 },
   brand: { color: c.fg, fontFamily: "monospace", letterSpacing: 3, fontSize: 14, fontWeight: "700" },
   navItem: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 9 },
   navItemActive: { backgroundColor: c.selected },
@@ -215,5 +317,30 @@ const useS = makeStyles((c) =>
   recentTitle: { flex: 1, color: c.fg, fontSize: 14 },
   recentTime: { color: c.muted, fontFamily: "monospace", fontSize: 11 },
   recentDel: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
+  foot: { position: "relative", paddingTop: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
+  profileRow: { flexDirection: "row", alignItems: "center", gap: 9, padding: 8, borderRadius: 10 },
+  avatar: {
+    width: 30, height: 30, borderRadius: 15, overflow: "hidden",
+    borderWidth: 1, borderColor: c.line, backgroundColor: c.raised,
+    alignItems: "center", justifyContent: "center",
+  },
+  avatarImg: { width: "100%", height: "100%" },
+  avatarText: { color: c.muted, fontFamily: "monospace", fontSize: 12, fontWeight: "600" },
+  profileEmail: { flex: 1, minWidth: 0, color: c.muted, fontSize: 13 },
+  menu: {
+    position: "absolute", left: 3, right: 3, bottom: "100%", marginBottom: 4,
+    backgroundColor: c.raised, borderWidth: 1, borderColor: c.line, borderRadius: 12, padding: 5,
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 15, shadowOffset: { width: 0, height: 10 }, elevation: 8,
+  },
+  menuItem: { paddingVertical: 10, paddingHorizontal: 9, borderRadius: 8 },
+  menuItemText: { color: c.fg, fontSize: 14.5 },
+  menuItemDanger: { color: c.error },
+  menuSection: { color: c.muted, fontFamily: "monospace", fontSize: 10, letterSpacing: 1, paddingHorizontal: 9, paddingTop: 8, paddingBottom: 6 },
+  segment: { flexDirection: "row", marginHorizontal: 6, borderWidth: 1, borderColor: c.line, borderRadius: 10, padding: 2, gap: 2 },
+  segmentItem: { flex: 1, alignItems: "center", paddingVertical: 7, borderRadius: 8 },
+  segmentItemOn: { backgroundColor: c.amber },
+  segmentText: { color: c.fg, fontSize: 13 },
+  segmentTextOn: { color: c.amberInk, fontWeight: "700" },
+  menuDivider: { height: 1, backgroundColor: c.line, marginVertical: 6, marginHorizontal: 3 },
   }),
 );

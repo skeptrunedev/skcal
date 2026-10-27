@@ -2,14 +2,16 @@ import { useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet, Platform } from "react-native";
 import { makeStyles, useTheme } from "./theme";
 import { setWeightNote, WeightReading, kgToLb } from "./api";
+import { ChevronLeftIcon, ChevronRightIcon } from "./icons";
 
 const PAGE = 7;
-const fmtDateYear = (ts: number) => new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+const fmtDate = (ts: number) => new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
-// Weigh-ins card shared by Today and Body, mirroring the web WeightHistory:
+// Today's weigh-ins card, mirroring the web WeightHistory:
 // the newest PAGE readings with newer/older paging, each with a note editor.
 export function WeighInsCard({ weights, onSaved }: { weights: WeightReading[]; onSaved: () => void }) {
   const s = useS();
+  const { c } = useTheme();
   // 0 = the newest PAGE weigh-ins; higher pages walk back in time.
   const [page, setPage] = useState(0);
   const pages = Math.max(1, Math.ceil(weights.length / PAGE));
@@ -27,25 +29,25 @@ export function WeighInsCard({ weights, onSaved }: { weights: WeightReading[]; o
       {pages > 1 && (
         <View style={s.pager}>
           <Pressable
-            style={s.more}
+            style={[s.pageBtn, at === 0 && s.pageBtnOff]}
             onPress={() => setPage(at - 1)}
             disabled={at === 0}
             accessibilityRole="button"
             accessibilityLabel="Newer weigh-ins"
           >
-            <Text style={[s.moreText, at === 0 && s.pagerOff]}>‹ NEWER</Text>
+            <ChevronLeftIcon size={17} color={c.muted} />
           </Pressable>
           <Text style={s.pagerLabel}>
             {at * PAGE + 1}–{at * PAGE + visible.length} of {weights.length}
           </Text>
           <Pressable
-            style={s.more}
+            style={[s.pageBtn, at === pages - 1 && s.pageBtnOff]}
             onPress={() => setPage(at + 1)}
             disabled={at === pages - 1}
             accessibilityRole="button"
             accessibilityLabel="Older weigh-ins"
           >
-            <Text style={[s.moreText, at === pages - 1 && s.pagerOff]}>OLDER ›</Text>
+            <ChevronRightIcon size={17} color={c.muted} />
           </Pressable>
         </View>
       )}
@@ -82,8 +84,8 @@ function WeighIn({ reading, onSaved }: { reading: WeightReading; onSaved: () => 
     <View style={s.row}>
       <View style={s.rowMain}>
         <Text style={s.rowLabel}>
-          {fmtDateYear(reading.ts)}
-          <Text style={s.rowSub}>{reading.source !== "manual" ? ` · ${reading.source}` : ""}</Text>
+          {fmtDate(reading.ts).toUpperCase()}
+          {reading.source !== "manual" ? ` · ${reading.source.toUpperCase()}` : ""}
         </Text>
         {editing ? (
           <TextInput
@@ -133,20 +135,18 @@ const useS = makeStyles((c) =>
       borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line,
     },
     rowMain: { flex: 1, minWidth: 0, gap: 3 },
-    rowLabel: { color: c.fg, fontSize: 14.5 },
-    rowSub: { color: c.muted, fontSize: 12, fontFamily: "monospace" },
+    rowLabel: { color: c.muted, fontSize: 11, fontFamily: "monospace", letterSpacing: 1, marginTop: 4 },
     rowVal: { color: c.fg, fontSize: 17, fontWeight: "600" },
     unit: { color: c.muted, fontSize: 13, fontWeight: "400" },
-    note: { color: c.muted, fontSize: 13, fontStyle: "italic" },
-    addNote: { color: c.dim, fontSize: 12.5 },
+    note: { color: c.muted, fontSize: 12, fontFamily: "monospace", lineHeight: 17 },
+    addNote: { color: c.dim, fontSize: 12, fontFamily: "monospace" },
     noteInput: {
       borderWidth: 1, borderColor: c.amberText, borderRadius: 8, backgroundColor: c.field, color: c.fg,
       paddingHorizontal: 10, paddingVertical: 6, fontSize: 14,
     },
-    more: { alignSelf: "center", paddingVertical: 10, paddingHorizontal: 14, marginTop: 4 },
-    moreText: { color: c.amberText, fontSize: 11.5, fontFamily: "monospace", letterSpacing: 1 },
-    pager: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
-    pagerLabel: { color: c.muted, fontSize: 11.5, fontFamily: "monospace" },
-    pagerOff: { color: c.dim },
+    pageBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 8 },
+    pageBtnOff: { opacity: 0.3 },
+    pager: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 8 },
+    pagerLabel: { color: c.fg, fontSize: 12, fontFamily: "monospace", minWidth: 72, textAlign: "center" },
   }),
 );

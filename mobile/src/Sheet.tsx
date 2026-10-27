@@ -23,7 +23,8 @@ export function Sheet({
   children,
 }: {
   open: boolean;
-  title: string;
+  /** Omitted where the sheet leads with its own header (the add sheet's tabs). */
+  title?: string;
   onClose: () => void;
   onSave?: () => void;
   saving: boolean;
@@ -62,7 +63,7 @@ export function Sheet({
             onPress={(e) => e.stopPropagation()}
           >
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.body} bounces={false}>
-              <Text style={s.title}>{title}</Text>
+              {title ? <Text style={s.title}>{title}</Text> : null}
               {children}
               {error ? <Text style={s.err}>{error}</Text> : null}
               <View style={s.actions}>
@@ -125,10 +126,11 @@ const useS = makeStyles((c) =>
       paddingHorizontal: 12, paddingVertical: 10, fontSize: 16,
     },
     err: { color: c.error, fontSize: 14 },
-    actions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 4 },
-    ghost: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12 },
-    ghostText: { color: c.muted, fontSize: 15 },
-    btn: { minWidth: 96, backgroundColor: c.amber, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12, alignItems: "center" },
+    // The web .sheet-actions: equal-width ghost + primary buttons.
+    actions: { flexDirection: "row", gap: 10, marginTop: 4 },
+    ghost: { flex: 1, alignItems: "center", borderWidth: 1, borderColor: c.line, borderRadius: 10, paddingVertical: 13 },
+    ghostText: { color: c.fg, fontSize: 15, fontWeight: "600" },
+    btn: { flex: 1, backgroundColor: c.amber, borderRadius: 10, paddingVertical: 13, alignItems: "center" },
     btnDim: { opacity: 0.6 },
     btnText: { color: c.amberInk, fontWeight: "700", fontSize: 15 },
   }),

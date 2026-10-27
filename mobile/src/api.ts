@@ -55,7 +55,8 @@ async function req(path: string, init: RequestInit = {}): Promise<Response> {
       ...CLIENT_HEADERS,
       ...(init.headers ?? {}),
       ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...(init.body ? { "content-type": "application/json" } : {}),
+      // Multipart bodies (meal photos, the avatar) set their own boundary.
+      ...(typeof init.body === "string" ? { "content-type": "application/json" } : {}),
     },
   });
 }
@@ -94,6 +95,8 @@ export type Dashboard = {
     latestKg: number | null;
     weeklyAvgKg: number | null;
     bodyFatPct: number | null;
+    /** Note on the newest weigh-in. */
+    note: string | null;
     trend: { ts: number; kg: number }[];
   };
   targets: {
@@ -104,12 +107,12 @@ export type Dashboard = {
   };
   measurementsLatest: { site: string; valueCm: number; ts: number }[];
   shoulderToWaist: number | null;
-  nutritionToday: { kcal: number | null; proteinG: number | null } | null;
+  nutritionToday: { kcal: number | null; proteinG: number | null; adherence?: "under" | "on" | "over" | null } | null;
   phase: Phase | null;
 };
 
-export async function dashboard(): Promise<Dashboard> {
-  const day = new Date().toLocaleDateString("en-CA");
+/** Everything Today shows, as of a local YYYY-MM-DD day (default today). */
+export async function dashboard(day: string = todayLocal()): Promise<Dashboard> {
   const tz = new Date().getTimezoneOffset();
   const r = await req(`/api/dashboard?date=${day}&tz=${tz}`);
   if (r.status === 401) throw new Error("unauthorized");
@@ -148,8 +151,8 @@ export async function agent(messages: ChatMessage[]): Promise<string> {
 
 // NDJSON event protocol shared with the web client (src/client/Coach.tsx):
 // {t:"conversation",id} names the saved conversation, {t:"text",v} appends a
-// reply delta, {t:"tool"} / {t:"result"} bracket a tool call. The reply is the
-// concatenation of every text delta.
+// reply delta, {t:"tool"} / {t:"result"} bracket a tool call (matched by id),
+// {t:"error"} means the reply failed partway.
 type AgentEvent =
   | { t: "conversation"; id?: string }
   | { t: "error"; message?: string }
@@ -157,24 +160,45 @@ type AgentEvent =
   | { t: "tool"; id?: string; name?: string; args?: unknown }
   | { t: "result"; id?: string; result?: unknown };
 
+// What a streamed reply renders as, in order (the web thread's assistant-ui
+// parts): text runs and the tool calls between them, each tool done once its
+// result is back.
+export type AgentStreamPart =
+  | { type: "text"; text: string }
+  | { type: "tool"; id: string; name: string; done: boolean };
+
+// Same copy as the web coach when a reply fails partway.
+const REPLY_FAILED = "The coach couldn't finish that reply. Please try again.";
+
 // Streaming twin of agent(): POSTs to /api/agent/stream and reads the response
 // body incrementally via expo/fetch (RN's global fetch has no readable body).
-// onText is called with the full accumulated reply on each text delta so the UI
-// re-renders live. onTool fires when a tool call starts (done false) and when
-// its result is back (done true) so the UI can show what the coach is doing.
+// onParts is called with a fresh copy of the reply's ordered parts on every
+// change so the UI re-renders live. A failure partway (an {t:"error"} event or
+// a stalled stream) ends the reply on an error line, like the web thread.
 //
-// The worker saves the turn into conversationId (null starts a new one) and
-// the resolved value carries the id it used. If the stream can't start, the
-// non-streaming agent() answers instead and the turn is saved from here.
+// Aborting `signal` stops reading and resolves with what arrived (stopped:
+// true); the worker saves a stopped turn too. The worker saves the turn into
+// conversationId (null starts a new one) and the resolved value carries the
+// id it used. If the stream can't start, the non-streaming agent() answers
+// instead and the turn is saved from here.
 export async function agentStream(
   messages: ChatMessage[],
   conversationId: string | null,
-  onText: (fullReply: string) => void,
-  onTool?: (name: string, done: boolean) => void,
-): Promise<{ reply: string; conversationId: string | null }> {
+  onParts: (parts: AgentStreamPart[]) => void,
+  signal?: AbortSignal,
+): Promise<{ parts: AgentStreamPart[]; conversationId: string | null; stopped: boolean }> {
   const token = await getToken();
-  const day = new Date().toLocaleDateString("en-CA");
+  const day = todayLocal();
   const tz = new Date().getTimezoneOffset();
+  const parts: AgentStreamPart[] = [];
+  let savedId = conversationId;
+  const result = () => ({ parts: parts.map((p) => ({ ...p })), conversationId: savedId, stopped: !!signal?.aborted });
+  const fallback = async () => {
+    const r = await agentFallback(messages, conversationId, (reply) => onParts([{ type: "text", text: reply }]));
+    if (r.reply) parts.push({ type: "text", text: r.reply });
+    savedId = r.conversationId;
+    return result();
+  };
   let res: Response;
   try {
     res = await streamFetch(`${BASE}/api/agent/stream?date=${day}`, {
@@ -185,22 +209,24 @@ export async function agentStream(
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ messages, date: day, tz, conversationId }),
+      signal,
     });
   } catch {
+    // expo/fetch rejects an aborted request with a plain FetchError.
+    if (signal?.aborted) return result();
     // Network/stream setup failed — fall back to the buffered endpoint.
-    return agentFallback(messages, conversationId, onText);
+    return fallback();
   }
   if (!res.ok || !res.body) {
     // Non-2xx or no streamable body — buffered fallback keeps chat working.
-    return agentFallback(messages, conversationId, onText);
+    return fallback();
   }
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  let reply = "";
-  let savedId = conversationId;
-  let failure: string | null = null;
+  let cur: { type: "text"; text: string } | null = null;
+  const emit = () => onParts(parts.map((p) => ({ ...p })));
   const handle = (line: string) => {
     const s = line.trim();
     if (!s) return;
@@ -213,31 +239,58 @@ export async function agentStream(
     if (ev.t === "conversation" && ev.id) {
       savedId = ev.id;
     } else if (ev.t === "text" && ev.v) {
-      reply += ev.v;
-      onText(reply);
+      if (!cur) {
+        cur = { type: "text", text: "" };
+        parts.push(cur);
+      }
+      cur.text += ev.v;
+      emit();
     } else if (ev.t === "tool") {
-      onTool?.(typeof ev.name === "string" ? ev.name : "", false);
+      cur = null;
+      parts.push({ type: "tool", id: String(ev.id), name: typeof ev.name === "string" ? ev.name : "", done: false });
+      emit();
     } else if (ev.t === "result") {
-      onTool?.("", true);
+      const p = parts.find((x) => x.type === "tool" && x.id === String(ev.id));
+      if (p && p.type === "tool") p.done = true;
+      emit();
     } else if (ev.t === "error") {
-      failure = ev.message || "The coach couldn't finish that reply.";
+      // The reply failed partway; say so rather than ending on silence.
+      cur = { type: "text", text: ev.message || REPLY_FAILED };
+      parts.push(cur);
+      emit();
     }
   };
 
-  for (;;) {
-    // A reply that goes quiet this long is stuck: stop waiting and say so.
-    const { done, value } = await withTimeout(reader.read(), STREAM_IDLE_MS, () => reader.cancel().catch(() => {}));
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      handle(buf.slice(0, nl));
-      buf = buf.slice(nl + 1);
+  // Race every read against the abort signal (the web thread does the same)
+  // so Stop takes effect even if the native read doesn't reject on cancel.
+  const aborted = new Promise<never>((_, reject) => {
+    const fail = () => reject(new Error("aborted"));
+    if (signal?.aborted) fail();
+    else signal?.addEventListener("abort", fail, { once: true });
+  });
+  aborted.catch(() => {});
+  try {
+    for (;;) {
+      // A reply that goes quiet this long is stuck: stop waiting and say so.
+      const read = withTimeout(reader.read(), STREAM_IDLE_MS, () => reader.cancel().catch(() => {}));
+      const { done, value } = await Promise.race([read, aborted]);
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        handle(buf.slice(0, nl));
+        buf = buf.slice(nl + 1);
+      }
     }
+  } catch {
+    reader.cancel().catch(() => {});
+    if (signal?.aborted) return result();
+    parts.push({ type: "text", text: REPLY_FAILED });
+    emit();
+    return result();
   }
   if (buf.trim()) handle(buf);
-  if (failure) throw new Error(failure);
-  return { reply, conversationId: savedId };
+  return result();
 }
 
 // Longest the reply stream may go without sending anything. Tool calls report
@@ -430,6 +483,43 @@ export async function editMealItem(id: number, patch: { name?: string; kcal?: nu
 /** <Image> source for a meal photo key (owner-scoped, so it needs the bearer). */
 export const mealPhotoSource = (key: string) => photoSource(`/api/nutrition/photo/${key}`);
 
+// A picked photo as a multipart part. Native fetch streams a file URI as-is;
+// the Expo-web preview has to hand FormData a real Blob.
+export type UploadImage = { uri: string; mimeType?: string | null };
+async function appendImage(fd: FormData, field: string, img: UploadImage, name: string): Promise<void> {
+  const type = img.mimeType || "image/jpeg";
+  if (WEB) fd.append(field, await (await globalThis.fetch(img.uri)).blob(), name);
+  else fd.append(field, { uri: img.uri, name, type } as unknown as Blob);
+}
+
+// What the meal analyzer logged, as on the web AddSheet's nutrition tab.
+export type MealAnalysis = {
+  ok: true;
+  mealId: string;
+  items: { name: string; kcal: number; proteinG: number }[];
+  totalKcal: number;
+  totalProteinG: number;
+  note: string;
+  photoKeys: string[];
+};
+
+/** Up to 5 photos of one meal (plus optional context) → AI-estimated items, logged on `date`. */
+export async function analyzeMeal(date: string, photos: UploadImage[], note?: string): Promise<MealAnalysis> {
+  const fd = new FormData();
+  for (const [i, p] of photos.entries()) await appendImage(fd, "photos", p, `meal-${i}.jpg`);
+  if (note?.trim()) fd.append("note", note.trim());
+  const r = await req(`/api/nutrition/analyze?date=${date}`, { method: "POST", body: fd });
+  if (!r.ok) return fail(r, "analyze");
+  return r.json() as Promise<MealAnalysis>;
+}
+
+/** A freeform description of a meal → AI-estimated items, logged on `date`. */
+export async function describeMeal(date: string, text: string): Promise<MealAnalysis> {
+  const r = await req(`/api/nutrition/describe?date=${date}`, { method: "POST", body: JSON.stringify({ text }) });
+  if (!r.ok) return fail(r, "describe");
+  return r.json() as Promise<MealAnalysis>;
+}
+
 // Same freeform-description path the agent's log_workout tool uses: the worker
 // parses the text into a normalized workout row and logs it.
 export async function describeWorkout(text: string, date?: string): Promise<void> {
@@ -551,6 +641,8 @@ export type MesoSummary = {
 };
 export type MesoDetail = MesoSummary & {
   days: { id: string; day: number; label: string | null; slots: { id: string; muscle: string; exerciseId: string; exerciseName: string; equipment: string }[] }[];
+  // Per week: every day has been reached, so its set counts are final.
+  weekPlanned: boolean[];
   volume: { muscle: string; label: string; mev: number | null; mav: [number, number] | null; mrv: number | null; setsByWeek: number[] }[];
 };
 export type TrainingSet = {
@@ -626,6 +718,67 @@ export const deleteSet = (id: string) => call<{ ok: true }>(`/api/training/sets/
 export const addSet = (slotId: string, week: number) => call<{ ok: true; set: TrainingSet }>(`/api/training/slots/${slotId}/sets`, "POST", { week });
 export const swapExercise = (slotId: string, exerciseId: string, fromWeek: number) =>
   call<{ ok: true }>(`/api/training/slots/${slotId}`, "PATCH", { exerciseId, fromWeek });
+
+// ---- Account: profile photo, API keys, linked numbers, billing ----
+// Same endpoints as the web app's profile menu.
+
+/** The session's profile image (Gravatar / Google / uploaded), if any. */
+export async function profileImage(): Promise<string | null> {
+  const r = await req(`/api/auth/get-session`);
+  if (!r.ok) return null;
+  const b = (await r.json().catch(() => null)) as { user?: { image?: string | null } } | null;
+  return b?.user?.image ?? null;
+}
+
+export async function setAvatar(img: UploadImage): Promise<{ image: string }> {
+  const fd = new FormData();
+  await appendImage(fd, "photo", img, "avatar.jpg");
+  const r = await req(`/api/profile/avatar`, { method: "POST", body: fd });
+  if (!r.ok) return fail(r, "avatar");
+  return r.json() as Promise<{ image: string }>;
+}
+
+export type ApiKey = { id: string; name: string; prefix: string; scopes: string[]; createdAt: number; lastUsedAt: number | null };
+
+// Fine-grained API-key scopes, mirroring API_SCOPES in src/shared/types.ts.
+export const API_SCOPES = [
+  "weight:read", "weight:write", "measurements:read", "measurements:write",
+  "nutrition:read", "nutrition:write", "targets:read", "targets:write",
+  "training:read", "training:write", "dashboard:read", "agent:read", "agent:write",
+] as const;
+
+export const listApiKeys = () => call<ApiKey[]>(`/api/keys`);
+export const createApiKey = (name: string, scopes: string[]) =>
+  call<ApiKey & { token: string }>(`/api/keys`, "POST", { name, scopes });
+export async function deleteApiKey(id: string): Promise<void> {
+  const r = await req(`/api/keys/${id}`, { method: "DELETE" });
+  if (!r.ok) return fail(r, "deleteApiKey");
+}
+
+export type Channel = { id: string; kind: "phone" | "telegram"; value: string; verified: boolean; createdAt: number };
+
+export const listChannels = () => call<Channel[]>(`/api/channels`);
+export async function startPhoneLink(phone: string): Promise<void> {
+  await call<unknown>(`/api/channels/phone/start`, "POST", { phone });
+}
+export const verifyPhoneLink = (phone: string, code: string) =>
+  call<Channel>(`/api/channels/phone/verify`, "POST", { phone, code });
+export async function deleteChannel(id: string): Promise<void> {
+  const r = await req(`/api/channels/${id}`, { method: "DELETE" });
+  if (!r.ok) return fail(r, "deleteChannel");
+}
+
+// `source` is which store granted access: an account can hold both a Stripe
+// and an App Store subscription.
+export type Billing = {
+  active: boolean;
+  exempt: boolean;
+  source: "stripe" | "apple" | null;
+  status: string | null;
+  periodEnd: number | null;
+  priceUsd: number;
+};
+export const billing = () => call<Billing>(`/api/billing`);
 
 // ---- Apple in-app purchase ----
 // Both routes are exempt from the worker's 402 subscription gate, so an

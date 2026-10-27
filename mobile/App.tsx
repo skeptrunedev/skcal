@@ -2,26 +2,36 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, BackHandler, Platform, Linking, Alert } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
-import { makeStyles, useTheme, ThemeProvider, type Palette, type ThemePref } from "./src/theme";
+import { makeStyles, useTheme, ThemeProvider, type Palette } from "./src/theme";
 import {
   getToken,
   setToken,
   whoami,
+  profileImage,
+  setAvatar,
+  billing as fetchBilling,
   listConversations,
   deleteConversation,
   deleteAccount,
+  todayLocal,
   ChatMessage,
   Conversation,
+  Dashboard,
+  Billing,
 } from "./src/api";
 import { SignIn } from "./src/SignIn";
 import { Today } from "./src/Today";
 import { Agent } from "./src/Agent";
-import { Body } from "./src/Body";
 import { Train } from "./src/Train";
 import { Drawer, DrawerView } from "./src/Drawer";
 import { Paywall } from "./src/Paywall";
+import { AddSheet } from "./src/AddSheet";
+import { McpInstall } from "./src/McpInstall";
+import { ApiKeys } from "./src/ApiKeys";
+import { LinkedNumbers } from "./src/LinkedNumbers";
 import { reconcilePendingTransactions, watchTransactions } from "./src/iap";
-import { PanelLeftIcon } from "./src/icons";
+import { pickFromLibrary, toUpload } from "./src/image";
+import { PanelLeftIcon, PlusIcon } from "./src/icons";
 
 // Content height of the top bar (below the status-bar inset).
 const TOPBAR_H = 50;
@@ -44,25 +54,40 @@ const DELETE_ACCOUNT_WARNING =
 
 type Session = { key: string; convId: string | null; messages: ChatMessage[] };
 
-const THEME_OPTIONS: { pref: ThemePref; label: string }[] = [
-  { pref: "system", label: "System" },
-  { pref: "light", label: "Light" },
-  { pref: "dark", label: "Dark" },
-];
+const TITLES: Record<DrawerView, string> = { today: "Today", train: "Train", coach: "Agent" };
 
-const TITLES: Record<DrawerView, string> = { today: "Today", body: "Body", train: "Train", coach: "Agent" };
+// Where an App Store subscriber manages or cancels their plan.
+const APPLE_SUBSCRIPTIONS_URL = "https://apps.apple.com/account/subscriptions";
+
+// True when the most recent weigh-in falls on today (local date). The trend is
+// raw readings in ascending time order, so the last point is the latest.
+function weightLoggedToday(data: Dashboard | null): boolean {
+  const last = data?.weight.trend.at(-1);
+  if (!last) return false;
+  return new Date(last.ts).toLocaleDateString("en-CA") === todayLocal();
+}
 
 function Shell() {
   const s = useS();
-  const { c, scheme, pref, setPref } = useTheme();
+  const { c, scheme } = useTheme();
   const insets = useSafeAreaInsets();
   const [ready, setReady] = useState(false);
   const [authed, setAuthed] = useState(false);
   const [view, setView] = useState<DrawerView>("today");
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const [keysOpen, setKeysOpen] = useState(false);
+  const [numbersOpen, setNumbersOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
+  const [avatar, setAvatarImage] = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [billing, setBilling] = useState<Billing | null>(null);
+  // Today's latest dashboard (picks the add sheet's first tab) and a counter
+  // that tells Today to refetch after the add sheet logs something.
+  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   // Set when any API call answers 402. Replaces the whole body with the paywall
   // so no screen can surface a raw "subscription required" string.
   const [blocked, setBlocked] = useState(false);
@@ -111,6 +136,8 @@ function Shell() {
   useEffect(() => {
     if (!authed) return;
     whoami().then((w) => setEmail(w.email)).catch(() => {});
+    profileImage().then(setAvatarImage).catch(() => {});
+    fetchBilling().then(setBilling).catch(() => {});
     loadConversations();
   }, [authed, loadConversations]);
 
@@ -132,27 +159,25 @@ function Shell() {
     });
   }, [authed]);
 
-  // Android back: close the drawer / avatar menu, then step back from Body,
-  // Train, or Agent to Today, before leaving the app.
+  // Android back: close the drawer, then step back from Train or Agent to
+  // Today, before leaving the app. (Sheets close themselves via Modal.)
   useEffect(() => {
-    if (!drawerOpen && !menuOpen && view === "today") return;
+    if (!drawerOpen && view === "today") return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (drawerOpen || menuOpen) {
-        setDrawerOpen(false);
-        setMenuOpen(false);
-      } else {
-        setView("today");
-      }
+      if (drawerOpen) setDrawerOpen(false);
+      else setView("today");
       return true;
     });
     return () => sub.remove();
-  }, [drawerOpen, menuOpen, view]);
+  }, [drawerOpen, view]);
 
   const signOut = useCallback(async () => {
-    setMenuOpen(false);
     setDrawerOpen(false);
     await setToken(null);
     setEmail(null);
+    setAvatarImage(null);
+    setBilling(null);
+    setDashboard(null);
     setConversations([]);
     setSession({ key: "new-0", convId: null, messages: [] });
     setView("today");
@@ -185,6 +210,23 @@ function Shell() {
   const navigate = (v: DrawerView) => {
     setDrawerOpen(false);
     setView(v);
+  };
+  // Drawer actions that open a sheet close the drawer first, as on the web.
+  const fromDrawer = (open: (v: boolean) => void) => () => {
+    setDrawerOpen(false);
+    open(true);
+  };
+  const pickAvatar = async () => {
+    const [asset] = await pickFromLibrary(false);
+    if (!asset) return;
+    setUploadingAvatar(true);
+    try {
+      setAvatarImage((await setAvatar(toUpload(asset))).image);
+    } catch {
+      // keep the current avatar
+    } finally {
+      setUploadingAvatar(false);
+    }
   };
   const newChat = () => {
     nonce.current += 1;
@@ -251,14 +293,11 @@ function Shell() {
           <PanelLeftIcon size={20} color={c.muted} />
         </Pressable>
         <Text style={s.topbarTitle}>{TITLES[view]}</Text>
-        <Pressable
-          style={s.avatar}
-          onPress={() => setMenuOpen((v) => !v)}
-          accessibilityLabel="Account"
-          accessibilityRole="button"
-        >
-          <Text style={s.avatarText}>{email?.[0]?.toUpperCase() ?? "·"}</Text>
-        </Pressable>
+        {view === "today" && (
+          <Pressable style={s.iconBtn} onPress={() => setAdding(true)} accessibilityLabel="Log entry">
+            <PlusIcon size={20} color={c.muted} />
+          </Pressable>
+        )}
       </View>
 
       <View style={[s.body, sideInsets]}>
@@ -268,10 +307,9 @@ function Shell() {
           <Today
             onAuthError={onAuthError}
             onSubscriptionRequired={HAS_PAYWALL ? () => setBlocked(true) : undefined}
-            onOpenBody={() => navigate("body")}
+            refreshKey={refreshKey}
+            onDashboard={setDashboard}
           />
-        ) : view === "body" ? (
-          <Body onAuthError={onAuthError} onSubscriptionRequired={HAS_PAYWALL ? () => setBlocked(true) : undefined} />
         ) : view === "train" ? (
           <Train onAuthError={onAuthError} onSubscriptionRequired={HAS_PAYWALL ? () => setBlocked(true) : undefined} />
         ) : (
@@ -285,48 +323,33 @@ function Shell() {
         )}
       </View>
 
-      {menuOpen && (
-        <>
-          <Pressable style={s.menuBackdrop} onPress={() => setMenuOpen(false)} accessibilityLabel="Close account menu" />
-          <View style={[s.menu, { top: insets.top + TOPBAR_H - 4, right: 10 + insets.right }]}>
-            <Text style={s.menuEmail}>{email ?? "…"}</Text>
-            <Text style={s.menuSection}>APPEARANCE</Text>
-            <View style={s.segment} accessibilityRole="radiogroup" accessibilityLabel="Appearance">
-              {THEME_OPTIONS.map((o) => (
-                <Pressable
-                  key={o.pref}
-                  style={[s.segmentItem, pref === o.pref && s.segmentItemOn]}
-                  onPress={() => setPref(o.pref)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: pref === o.pref }}
-                  accessibilityLabel={`${o.label} appearance`}
-                >
-                  <Text style={[s.segmentText, pref === o.pref && s.segmentTextOn]}>{o.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <View style={s.menuDivider} />
-            <Pressable style={s.menuItem} onPress={signOut}>
-              <Text style={s.menuItemText}>Sign out</Text>
-            </Pressable>
-            <Pressable
-              style={s.menuItem}
-              onPress={confirmDeleteAccount}
-              disabled={deleting}
-              accessibilityRole="button"
-              accessibilityLabel="Delete account"
-            >
-              <Text style={[s.menuItemText, s.menuItemDanger]}>{deleting ? "Deleting…" : "Delete account"}</Text>
-            </Pressable>
-          </View>
-        </>
-      )}
-
       <Drawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         view={view}
         onNavigate={navigate}
+        onAdd={fromDrawer(setAdding)}
+        onInstallMcp={fromDrawer(setMcpOpen)}
+        account={{
+          email,
+          avatar,
+          uploadingAvatar,
+          deleting,
+          onPickAvatar: pickAvatar,
+          onApiKeys: fromDrawer(setKeysOpen),
+          onLinkedNumbers: fromDrawer(setNumbersOpen),
+          // App Store subscribers manage their plan with Apple. Android has no
+          // purchase path yet, and web (Stripe) billing stays on the web app.
+          onBilling:
+            Platform.OS === "ios" && billing && !billing.exempt && billing.source === "apple"
+              ? () => {
+                  setDrawerOpen(false);
+                  Linking.openURL(APPLE_SUBSCRIPTIONS_URL);
+                }
+              : null,
+          onSignOut: signOut,
+          onDeleteAccount: confirmDeleteAccount,
+        }}
         conversations={filtered}
         activeId={session.convId}
         search={search}
@@ -335,6 +358,19 @@ function Shell() {
         onOpenConversation={openConversation}
         onDeleteConversation={removeConversation}
       />
+
+      {adding && (
+        <AddSheet
+          open
+          onClose={() => setAdding(false)}
+          onChange={() => setRefreshKey((k) => k + 1)}
+          // If today's weigh-in is already logged, open straight to nutrition.
+          defaultTab={weightLoggedToday(dashboard) ? "nutrition" : "weight"}
+        />
+      )}
+      <McpInstall open={mcpOpen} onClose={() => setMcpOpen(false)} />
+      <ApiKeys open={keysOpen} onClose={() => setKeysOpen(false)} />
+      <LinkedNumbers open={numbersOpen} onClose={() => setNumbersOpen(false)} />
     </View>
   );
 }
@@ -359,35 +395,8 @@ const useS = makeStyles((C: Palette) =>
   },
   iconBtn: { width: 38, height: TOPBAR_H, alignItems: "center", justifyContent: "center", borderRadius: 8 },
   topbarTitle: { flex: 1, color: C.fg, fontSize: 15.5, fontWeight: "600" },
-  avatar: {
-    width: 30, height: 30, borderRadius: 15, marginRight: 4,
-    borderWidth: 1, borderColor: C.line, backgroundColor: C.raised,
-    alignItems: "center", justifyContent: "center",
-  },
-  avatarText: { color: C.muted, fontFamily: "monospace", fontSize: 12, fontWeight: "600" },
   // Full window width in every orientation; screens lay out one or two
   // columns from the width they get (src/layout.ts).
   body: { flex: 1 },
-  menuBackdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
-  menu: {
-    position: "absolute", minWidth: 230,
-    backgroundColor: C.raised, borderWidth: 1, borderColor: C.line, borderRadius: 14, padding: 6,
-    shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: { width: 4, height: 4 }, elevation: 8,
-  },
-  menuEmail: {
-    color: C.muted, fontFamily: "monospace", fontSize: 11,
-    paddingHorizontal: 9, paddingTop: 7, paddingBottom: 9,
-    borderBottomWidth: 1, borderBottomColor: C.line,
-  },
-  menuItem: { marginTop: 5, paddingVertical: 10, paddingHorizontal: 9, borderRadius: 10 },
-  menuItemText: { color: C.fg, fontSize: 14.5 },
-  menuItemDanger: { color: C.error },
-  menuSection: { color: C.muted, fontFamily: "monospace", fontSize: 10, letterSpacing: 1, paddingHorizontal: 9, paddingTop: 10, paddingBottom: 6 },
-  segment: { flexDirection: "row", marginHorizontal: 6, borderWidth: 1, borderColor: C.line, borderRadius: 10, padding: 2, gap: 2 },
-  segmentItem: { flex: 1, alignItems: "center", paddingVertical: 7, borderRadius: 8 },
-  segmentItemOn: { backgroundColor: C.amber },
-  segmentText: { color: C.fg, fontSize: 13 },
-  segmentTextOn: { color: C.amberInk, fontWeight: "700" },
-  menuDivider: { height: 1, backgroundColor: C.line, marginTop: 10, marginHorizontal: 3 },
   }),
 );

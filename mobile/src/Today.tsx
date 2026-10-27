@@ -7,7 +7,7 @@ import {
   listMeals, Meal, todayLocal, listWeight, WeightReading, listWorkouts, Workout,
 } from "./api";
 import { healthSupported, isHealthConnected, connectAppleHealth, syncAppleHealth } from "./health";
-import { XIcon } from "./icons";
+import { XIcon, ChevronLeftIcon, ChevronRightIcon } from "./icons";
 import { WeightChart } from "./WeightChart";
 import { MealsCard } from "./Meals";
 import { WeighInsCard } from "./WeighIns";
@@ -16,6 +16,12 @@ import { PhaseCard } from "./PhaseCard";
 import { MEASUREMENT_SITES, siteLabel } from "./sites";
 import { useContentWidth, COMPACT_WIDTH } from "./layout";
 import { weeklyDeltaLb, weightInsight } from "./weight";
+import { shiftDay, dayLabel } from "./dates";
+
+// Fallback targets until a phase or the targets endpoint sets real ones, as
+// on the web dashboard.
+const DEFAULT_KCAL_TARGET = 1850;
+const DEFAULT_PROTEIN_TARGET = 160;
 
 // "08:00" in the reminder's tz → "8:00 AM CDT · weekdays" style, mirroring the
 // web card. Hermes ships Intl, but guard timeZoneName and fall back to the raw
@@ -175,7 +181,8 @@ function AppleHealthCard({
 export function Today({
   onAuthError,
   onSubscriptionRequired,
-  onOpenBody,
+  refreshKey,
+  onDashboard,
 }: {
   onAuthError: (e: Error) => void;
   /**
@@ -184,13 +191,18 @@ export function Today({
    * Android clients, so a 402 there is shown as a plain inactive-account error.
    */
   onSubscriptionRequired?: () => void;
-  /** Opens the Body screen (weigh-ins and measurements). */
-  onOpenBody: () => void;
+  /** Bumped by the shell after the add sheet logs something: refetch. */
+  refreshKey: number;
+  /** Each fresh dashboard, so the shell can pick the add sheet's first tab. */
+  onDashboard: (d: Dashboard) => void;
 }) {
   const s = useS();
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const { width, twoColumn } = useContentWidth();
+  // The day everything on Today reflects (weight, nutrition, food log,
+  // workouts), moved with the day strip at the bottom.
+  const [day, setDay] = useState(() => todayLocal());
   const [data, setData] = useState<Dashboard | null>(null);
   const [meals, setMeals] = useState<Meal[] | null>(null);
   const [weights, setWeights] = useState<WeightReading[] | null>(null);
@@ -211,11 +223,11 @@ export function Today({
 
   const loadMeals = useCallback(async () => {
     try {
-      setMeals(await listMeals(todayLocal()));
+      setMeals(await listMeals(day));
     } catch {
       setMeals((m) => m ?? []);
     }
-  }, []);
+  }, [day]);
 
   const loadWeights = useCallback(async () => {
     try {
@@ -227,11 +239,11 @@ export function Today({
 
   const loadWorkouts = useCallback(async () => {
     try {
-      setWorkouts(await listWorkouts(todayLocal()));
+      setWorkouts(await listWorkouts(day));
     } catch {
       setWorkouts((w) => w ?? []);
     }
-  }, []);
+  }, [day]);
 
   const load = useCallback(async () => {
     const side = Promise.all([loadReminders(), loadMeals(), loadWeights(), loadWorkouts()]);
@@ -245,7 +257,9 @@ export function Today({
       // never let HealthKit trouble block the dashboard
     }
     try {
-      setData(await dashboard());
+      const d = await dashboard(day);
+      setData(d);
+      onDashboard(d);
       setError(null);
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
@@ -257,26 +271,25 @@ export function Today({
       else setError(err.message);
     }
     await side;
-  }, [onAuthError, onSubscriptionRequired, loadReminders, loadMeals, loadWeights, loadWorkouts]);
+  }, [day, onAuthError, onSubscriptionRequired, onDashboard, loadReminders, loadMeals, loadWeights, loadWorkouts]);
 
   // A meal edit or removal changes both the list and the day's totals.
+  const reloadDashboard = useCallback(async () => {
+    try {
+      const d = await dashboard(day);
+      setData(d);
+      onDashboard(d);
+    } catch {
+      // the next pull-to-refresh or foreground reload catches up
+    }
+  }, [day, onDashboard]);
   const onMealsChanged = useCallback(async () => {
     await loadMeals();
-    try {
-      setData(await dashboard());
-    } catch {
-      // the next pull-to-refresh or foreground reload catches up
-    }
-  }, [loadMeals]);
+    await reloadDashboard();
+  }, [loadMeals, reloadDashboard]);
 
   // Starting or ending a phase can reset the calorie and protein targets.
-  const onPhaseChanged = useCallback(async () => {
-    try {
-      setData(await dashboard());
-    } catch {
-      // the next pull-to-refresh or foreground reload catches up
-    }
-  }, []);
+  const onPhaseChanged = reloadDashboard;
 
   const connectHealth = useCallback(async () => {
     const ok = await connectAppleHealth().catch(() => false);
@@ -293,7 +306,7 @@ export function Today({
     // resolves) so the card doesn't flash the CONNECT button on relaunch.
     isHealthConnected().then(setHealthConnected).catch(() => {});
     load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   // Foregrounding refetches: the iMessage agent may have logged food while the
   // app sat in the background, so the totals would otherwise be stale.
@@ -314,9 +327,19 @@ export function Today({
   if (error) return <View style={s.center}><Text style={s.err}>{error}</Text></View>;
   if (!data) return <View style={s.center}><Text style={s.muted}>loading…</Text></View>;
 
-  const latestLb = data.weight.latestKg != null ? kgToLb(data.weight.latestKg) : null;
-  const trend = data.weight.trend;
+  const isToday = day === todayLocal();
+  const label = dayLabel(day);
+  const { weight, targets } = data;
+  const latestLb = weight.latestKg != null ? kgToLb(weight.latestKg) : null;
+  const avgLb = weight.weeklyAvgKg != null ? kgToLb(weight.weeklyAvgKg) : null;
+  const goalLb = targets.goalWeightKg != null ? kgToLb(targets.goalWeightKg) : null;
+  const startLb = targets.startWeightKg != null ? kgToLb(targets.startWeightKg) : null;
+  const trend = weight.trend;
   const ins = weightInsight(latestLb, weeklyDeltaLb(trend), c, data.phase?.kind ?? null);
+  let progressPct: number | null = null;
+  if (latestLb != null && goalLb != null && startLb != null && startLb !== goalLb) {
+    progressPct = Math.max(0, Math.min(100, ((startLb - latestLb) / (startLb - goalLb)) * 100));
+  }
   const bySite = (site: string) => data.measurementsLatest.find((m) => m.site === site);
   const waist = bySite("waist");
   const arm = bySite("arm_r") ?? bySite("arm_l");
@@ -324,33 +347,34 @@ export function Today({
     ...MEASUREMENT_SITES.map((site) => bySite(site)).filter((m): m is NonNullable<typeof m> => !!m),
     ...data.measurementsLatest.filter((m) => !(MEASUREMENT_SITES as readonly string[]).includes(m.site)),
   ];
-  const kcal = data.nutritionToday?.kcal ?? 0;
-  const protein = data.nutritionToday?.proteinG ?? 0;
-  const kcalTarget = data.targets.dailyKcalTarget;
-  const proteinTarget = data.targets.proteinTargetG;
-  const kcalPct = kcalTarget ? Math.min(100, (kcal / kcalTarget) * 100) : 0;
-  const proteinPct = proteinTarget ? Math.min(100, (protein / proteinTarget) * 100) : 0;
-  const kcalOver = kcalTarget != null && kcal > kcalTarget;
-  const proteinHit = proteinTarget != null && protein >= proteinTarget;
+  const nutrition = data.nutritionToday;
+  const kcal = nutrition?.kcal ?? null;
+  const protein = nutrition?.proteinG ?? null;
+  const kcalTarget = targets.dailyKcalTarget ?? DEFAULT_KCAL_TARGET;
+  const proteinTarget = targets.proteinTargetG ?? DEFAULT_PROTEIN_TARGET;
+  const kcalPct = kcal != null ? Math.min(100, (kcal / kcalTarget) * 100) : 0;
+  const proteinPct = protein != null ? Math.min(100, (protein / proteinTarget) * 100) : 0;
+  const kcalOver = kcal != null && kcal > kcalTarget;
+  const proteinHit = protein != null && protein >= proteinTarget;
+  const nutStatus = nutrition?.adherence
+    ? {
+        under: { label: "UNDER", color: c.info },
+        on: { label: "ON TARGET", color: c.amberText },
+        over: { label: "OVER", color: c.attention },
+      }[nutrition.adherence]
+    : null;
 
-  // The body summary (glance strip, weight card, S:W, measurements) is the
-  // way into the Body screen, so each of those is one big tap target.
   const glance = (
-    <Pressable
-      style={s.glance}
-      onPress={onOpenBody}
-      accessibilityRole="button"
-      accessibilityLabel="Open body tracking"
-    >
+    <View style={s.glance}>
       <View style={s.gitem}><Text style={s.gval}>{latestLb != null ? latestLb.toFixed(1) : "—"}</Text><Text style={s.glabel}>WEIGHT LB</Text></View>
       <View style={s.gitem}><Text style={s.gval}>{data.shoulderToWaist != null ? data.shoulderToWaist.toFixed(2) : "—"}</Text><Text style={s.glabel}>S : W</Text></View>
       <View style={s.gitem}><Text style={s.gval}>{waist ? cmToIn(waist.valueCm).toFixed(1) : "—"}</Text><Text style={s.glabel}>WAIST IN</Text></View>
       <View style={s.gitem}><Text style={s.gval}>{arm ? cmToIn(arm.valueCm).toFixed(1) : "—"}</Text><Text style={s.glabel}>ARM IN</Text></View>
-    </Pressable>
+    </View>
   );
 
   const weightCard = (
-    <Pressable style={s.card} onPress={onOpenBody} accessibilityRole="button" accessibilityLabel="Weight. Open body tracking">
+    <View style={s.card}>
       <View style={s.cardHead}>
         <Text style={[s.cardLabel, s.shrink]}>WEIGHT / LB</Text>
         {ins.status && <Text style={[s.status, { color: ins.status.color }]}>{ins.status.label}</Text>}
@@ -361,51 +385,77 @@ export function Today({
         <Text style={s.bigUnit}>LB</Text>
       </View>
       <WeightChart trend={trend} />
-      <View style={s.rangeRow}>
-        <Text style={s.rangeText}>START {data.targets.startWeightKg != null ? kgToLb(data.targets.startWeightKg).toFixed(1) : "—"}</Text>
-        <Text style={s.rangeText}>GOAL {data.targets.goalWeightKg != null ? kgToLb(data.targets.goalWeightKg).toFixed(1) : "—"}</Text>
+      {progressPct != null && (
+        <>
+          <View style={s.rangebar}>
+            <View style={[s.rangebarFill, { width: `${progressPct}%` as DimensionValue }]} />
+          </View>
+          <View style={s.rangeRow}>
+            <Text style={s.rangeText}>START {startLb!.toFixed(1)}</Text>
+            <Text style={s.rangeText}>GOAL {goalLb!.toFixed(1)}</Text>
+          </View>
+        </>
+      )}
+      <View style={s.metaRow}>
+        <Text style={s.meta}>7-DAY AVG {avgLb != null ? avgLb.toFixed(1) : "—"}</Text>
+        {weight.bodyFatPct != null && <Text style={s.meta}>BF≈ {weight.bodyFatPct.toFixed(1)}% (noisy)</Text>}
       </View>
-      <Text style={s.open}>WEIGH-INS & MEASUREMENTS ›</Text>
-    </Pressable>
+      {weight.note ? <Text style={s.noteLine}>“{weight.note}”</Text> : null}
+    </View>
   );
 
   const nutritionCard = (
     <View style={s.card}>
-      <Text style={s.cardLabel}>NUTRITION / TODAY</Text>
-      <View style={s.nutRow}>
-        <View style={s.nutTop}>
-          <Text style={s.mname}>CALORIES</Text>
-          <Text style={s.nutVal}>{kcal} / {kcalTarget ?? "—"} kcal</Text>
-        </View>
-        <View style={s.bar}>
-          <View style={[s.barFill, { width: `${kcalPct}%` as DimensionValue, backgroundColor: kcalOver ? c.amber : c.info }]} />
-        </View>
+      <View style={s.cardHead}>
+        <Text style={[s.cardLabel, s.shrink]}>NUTRITION / {label.toUpperCase()}</Text>
+        {nutStatus && <Text style={[s.status, { color: nutStatus.color }]}>{nutStatus.label}</Text>}
       </View>
-      <View style={s.nutRow}>
-        <View style={s.nutTop}>
-          <Text style={s.mname}>PROTEIN</Text>
-          <Text style={s.nutVal}>{Math.round(protein)} / {proteinTarget ?? "—"} g</Text>
-        </View>
-        <View style={s.bar}>
-          <View style={[s.barFill, { width: `${proteinPct}%` as DimensionValue, backgroundColor: proteinHit ? c.amber : c.info }]} />
-        </View>
-      </View>
+      {nutrition == null ? (
+        <Text style={s.remEmpty}>log today's intake — tap +</Text>
+      ) : (
+        <>
+          <View style={s.nutRow}>
+            <View style={s.nutTop}>
+              <Text style={s.mname}>CALORIES</Text>
+              <Text style={s.nutVal}>
+                {kcal ?? "—"}
+                <Text style={s.nutUnit}> / {kcalTarget}</Text>
+              </Text>
+            </View>
+            <View style={s.bar}>
+              <View style={[s.barFill, { width: `${kcalPct}%` as DimensionValue, backgroundColor: kcalOver ? c.attention : c.info }]} />
+            </View>
+          </View>
+          <View style={s.nutRow}>
+            <View style={s.nutTop}>
+              <Text style={s.mname}>PROTEIN</Text>
+              <Text style={s.nutVal}>
+                {protein != null ? Math.round(protein) : "—"}
+                <Text style={s.nutUnit}> / {proteinTarget} g</Text>
+              </Text>
+            </View>
+            <View style={s.bar}>
+              <View style={[s.barFill, { width: `${proteinPct}%` as DimensionValue, backgroundColor: proteinHit ? c.amber : c.info }]} />
+            </View>
+          </View>
+        </>
+      )}
     </View>
   );
 
-  const ratioCard = data.shoulderToWaist != null && (
-    <Pressable style={s.card} onPress={onOpenBody} accessibilityRole="button" accessibilityLabel="Shoulder to waist ratio. Open body tracking">
+  const ratioCard = (
+    <View style={s.card}>
       <Text style={s.cardLabel}>SHOULDER : WAIST</Text>
-      <Text style={s.medium}>{data.shoulderToWaist.toFixed(3)}</Text>
-      <Text style={s.mutedSmall}>higher = more V-taper, your "more muscular" metric</Text>
-    </Pressable>
+      <Text style={s.medium}>{data.shoulderToWaist != null ? data.shoulderToWaist.toFixed(3) : "—"}</Text>
+      <Text style={s.mutedSmall}>higher = more V-taper · your "more muscular" metric</Text>
+    </View>
   );
 
   const measurementsCard = (
-    <Pressable style={s.card} onPress={onOpenBody} accessibilityRole="button" accessibilityLabel="Measurements. Open body tracking">
+    <View style={s.card}>
       <Text style={s.cardLabel}>MEASUREMENTS / IN</Text>
       {ordered.length === 0 ? (
-        <Text style={s.remEmpty}>no measurements yet — tap to add one</Text>
+        <Text style={s.remEmpty}>no measurements yet — tap + to add</Text>
       ) : (
         ordered.map((m) => (
           <View key={m.site} style={s.mrow}>
@@ -414,19 +464,39 @@ export function Today({
           </View>
         ))
       )}
-    </Pressable>
+    </View>
   );
 
   // Right after the meals, as on the web Today (under the food log).
   const phaseCard = <PhaseCard phase={data.phase} onChange={onPhaseChanged} />;
-  const mealsCard = <MealsCard meals={meals} onChanged={onMealsChanged} />;
+  const mealsCard = <MealsCard meals={meals} day={label} onChanged={onMealsChanged} />;
   // Under the phase card, as on the web Today.
   const weighInsCard = weights && <WeighInsCard weights={weights} onSaved={loadWeights} />;
-  const workoutsCard = <WorkoutsCard workouts={workouts} onChanged={loadWorkouts} />;
+  const workoutsCard = <WorkoutsCard workouts={workouts} day={label} onChanged={loadWorkouts} />;
   const remindersCard = reminders && <RemindersCard data={reminders} onChanged={loadReminders} />;
   // Apple Health is an iOS service; Android shows no card rather than naming another platform.
   const healthCard = Platform.OS !== "android" && (
     <AppleHealthCard connected={healthConnected} lastSync={healthSync} onConnect={connectHealth} />
+  );
+
+  // Whole-day navigation: everything above reflects this day.
+  const dayStrip = (
+    <View style={s.dayStrip}>
+      <Pressable style={s.dayBtn} onPress={() => setDay(shiftDay(day, -1))} accessibilityRole="button" accessibilityLabel="Previous day" hitSlop={6}>
+        <ChevronLeftIcon size={18} color={c.muted} />
+      </Pressable>
+      <Text style={s.dayLabel}>{label}</Text>
+      <Pressable
+        style={[s.dayBtn, isToday && s.dayBtnOff]}
+        onPress={() => setDay(shiftDay(day, 1))}
+        disabled={isToday}
+        accessibilityRole="button"
+        accessibilityLabel="Next day"
+        hitSlop={6}
+      >
+        <ChevronRightIcon size={18} color={c.muted} />
+      </Pressable>
+    </View>
   );
 
   return (
@@ -468,6 +538,7 @@ export function Today({
           {healthCard}
         </>
       )}
+      {dayStrip}
     </ScrollView>
   );
 }
@@ -498,9 +569,13 @@ const useS = makeStyles((c) =>
     big: { color: c.fg, fontSize: 64, fontWeight: "800", lineHeight: 68 },
     bigCompact: { fontSize: 42, lineHeight: 46 },
     bigUnit: { color: c.muted, fontSize: 16, fontFamily: "monospace", marginBottom: 12 },
-    rangeRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", columnGap: 12, marginTop: 8 },
-    rangeText: { color: c.muted, fontSize: 12.5, fontFamily: "monospace" },
-    open: { color: c.amberText, fontSize: 11.5, fontFamily: "monospace", letterSpacing: 1, marginTop: 14 },
+    rangebar: { height: 8, borderRadius: 999, backgroundColor: c.line, overflow: "hidden", marginTop: 10 },
+    rangebarFill: { height: "100%", borderRadius: 999, backgroundColor: c.amber },
+    rangeRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", columnGap: 12, marginTop: 6 },
+    rangeText: { color: c.dim, fontSize: 11, fontFamily: "monospace" },
+    metaRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", columnGap: 16, rowGap: 4, marginTop: 10 },
+    meta: { color: c.muted, fontSize: 12, fontFamily: "monospace", letterSpacing: 0.4 },
+    noteLine: { color: c.muted, fontSize: 12.5, fontFamily: "monospace", lineHeight: 19, marginTop: 9 },
     medium: { color: c.fg, fontSize: 38, fontWeight: "800", marginVertical: 4 },
     mrow: { flexDirection: "row", justifyContent: "space-between", gap: 12, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
     mname: { color: c.muted, fontSize: 13, fontFamily: "monospace", letterSpacing: 1 },
@@ -508,6 +583,11 @@ const useS = makeStyles((c) =>
     nutRow: { paddingVertical: 11, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
     nutTop: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", alignItems: "baseline", columnGap: 12, marginBottom: 8 },
     nutVal: { color: c.fg, fontSize: 14, fontFamily: "monospace" },
+    nutUnit: { color: c.muted, fontSize: 12.5 },
+    dayStrip: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingTop: 10 },
+    dayBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 8 },
+    dayBtnOff: { opacity: 0.3 },
+    dayLabel: { color: c.fg, fontSize: 13, fontFamily: "monospace", letterSpacing: 0.5, minWidth: 110, textAlign: "center" },
     bar: { height: 8, borderRadius: 999, backgroundColor: c.line, overflow: "hidden" },
     barFill: { height: "100%", borderRadius: 999 },
     remEmpty: { color: c.dim, fontSize: 12, fontFamily: "monospace", paddingVertical: 8 },

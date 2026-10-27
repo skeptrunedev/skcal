@@ -665,38 +665,21 @@ function MesoPlan({ id, lib, onEnded }: { id: string; lib: TrainingLibrary | nul
           <Text style={[s.cardLabel, s.shrink]}>WEEKLY SETS / MUSCLE</Text>
           <Text style={s.meta}>MEV · MRV</Text>
         </View>
-        {/* Scrolls sideways when an 8-week meso doesn't fit a narrow phone. */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.volScroll}>
-          <View style={s.vol}>
-            <View style={s.volRow}>
-              <Text style={s.volM} />
-              {m.calendar.map((w) => (
-                <Text key={w.week} style={[s.volH, s.volCell]}>
-                  {w.deload ? "DL" : `W${w.week}`}
-                </Text>
-              ))}
-              <Text style={[s.volH, s.volRange]}>RANGE</Text>
-            </View>
-            {m.volume.map((v) => (
-              <View key={v.muscle} style={s.volRow}>
-                <Text style={s.volM} numberOfLines={1}>
-                  {v.label.toUpperCase()}
-                </Text>
-                {v.setsByWeek.map((n, i) => (
-                  <Text
-                    key={i}
-                    style={[s.volN, s.volCell, v.mrv != null && n > v.mrv ? s.volOver : v.mev != null && n > 0 && n < v.mev ? s.volUnder : null]}
-                  >
-                    {n || "·"}
-                  </Text>
-                ))}
-                <Text style={s.volR}>
-                  {v.mev ?? "?"}–{v.mrv ?? "?"}
-                </Text>
-              </View>
+        {/* Narrow week columns so an 8-week meso fits a phone; the muscle name ellipsizes. */}
+        <View style={s.vol}>
+          <View style={s.volRow}>
+            <Text style={s.volM} />
+            {m.calendar.map((w) => (
+              <Text key={w.week} style={[s.volH, s.volCell]}>
+                {w.deload ? "DL" : `W${w.week}`}
+              </Text>
             ))}
+            <Text style={[s.volH, s.volRange]}>RANGE</Text>
           </View>
-        </ScrollView>
+          {m.volume.map((v) => (
+            <VolumeRow key={v.muscle} v={v} planned={m.weekPlanned} />
+          ))}
+        </View>
         <Text style={s.meta}>weeks plan ahead as you log; sets climb from MEV toward MRV with your feedback</Text>
       </View>
       {m.days.map((d) => (
@@ -723,6 +706,34 @@ function MesoPlan({ id, lib, onEnded }: { id: string; lib: TrainingLibrary | nul
         </Pressable>
       </View>
     </>
+  );
+}
+
+// A week still being planned (some days not reached yet) shows its partial
+// count dimmed and isn't judged against the landmarks.
+function VolumeRow({ v, planned }: { v: MesoDetail["volume"][number]; planned: boolean[] }) {
+  const s = useS();
+  return (
+    <View style={s.volRow}>
+      <Text style={s.volM} numberOfLines={1}>
+        {v.label.toUpperCase()}
+      </Text>
+      {v.setsByWeek.map((n, i) => (
+        <Text
+          key={i}
+          style={[
+            s.volN,
+            s.volCell,
+            !planned[i] ? s.volPartial : v.mrv != null && n > v.mrv ? s.volOver : v.mev != null && n > 0 && n < v.mev ? s.volUnder : null,
+          ]}
+        >
+          {n || "·"}
+        </Text>
+      ))}
+      <Text style={s.volR}>
+        {v.mev ?? "?"}–{v.mrv ?? "?"}
+      </Text>
+    </View>
   );
 }
 
@@ -943,14 +954,14 @@ function MesoBuilder({ lib, onCancel, onCreated }: { lib: TrainingLibrary; onCan
             onPress={() => edit(i, (x) => ({ ...x, slots: [...x.slots, { muscle: "chest", exerciseId: firstFor("chest", x.slots.map((y) => y.exerciseId)) }] }))}
             accessibilityRole="button"
           >
-            <PlusIcon size={15} color={c.amberText} />
+            <PlusIcon size={15} color={c.fg} />
             <Text style={s.ghostOutlineText}>Add a muscle group</Text>
           </Pressable>
         </View>
       ))}
       {days.length < 7 && (
         <Pressable style={s.ghostOutline} onPress={() => setDays((ds) => [...ds, { label: `Day ${ds.length + 1}`, slots: [] }])} accessibilityRole="button">
-          <PlusIcon size={15} color={c.amberText} />
+          <PlusIcon size={15} color={c.fg} />
           <Text style={s.ghostOutlineText}>Add a day</Text>
         </Pressable>
       )}
@@ -986,7 +997,9 @@ function MesoBuilder({ lib, onCancel, onCreated }: { lib: TrainingLibrary; onCan
 // RNW draws a UA focus ring the border already replaces.
 const WEB_NO_RING = { outlineStyle: "none", outlineWidth: 0 } as unknown as object;
 
-const VOL_CELL = 30;
+// The web grid's 1.6rem week columns and 2.6rem range column.
+const VOL_CELL = 26;
+const VOL_RANGE = 42;
 
 const useS = makeStyles((c) =>
   StyleSheet.create({
@@ -1010,11 +1023,11 @@ const useS = makeStyles((c) =>
     iconBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 8 },
     x: { width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: 8 },
 
-    tabs: { flexDirection: "row", borderWidth: 1, borderColor: c.line, borderRadius: 12, padding: 3, gap: 3, backgroundColor: c.card },
+    tabs: { flexDirection: "row", borderRadius: 12, padding: 4, gap: 4, backgroundColor: c.field, borderWidth: 1, borderColor: c.line },
     tab: { flex: 1, alignItems: "center", paddingVertical: 9, borderRadius: 9 },
-    tabOn: { backgroundColor: c.amber },
-    tabText: { color: c.fg, fontSize: 14 },
-    tabTextOn: { color: c.amberInk, fontWeight: "700" },
+    tabOn: { backgroundColor: c.selected },
+    tabText: { color: c.muted, fontSize: 11.5, fontFamily: "monospace", letterSpacing: 0.8, textTransform: "uppercase" },
+    tabTextOn: { color: c.fg },
 
     week: { color: c.fg, fontSize: 26, fontWeight: "700", letterSpacing: -0.4, marginBottom: 4 },
     weekDay: { color: c.muted, fontWeight: "500" },
@@ -1022,7 +1035,8 @@ const useS = makeStyles((c) =>
     exTop: { flexDirection: "row", alignItems: "center", gap: 8 },
     muscle: {
       color: c.amberText, fontSize: 10, fontFamily: "monospace", letterSpacing: 1.2,
-      borderWidth: 1, borderColor: c.amberText, borderRadius: 6, paddingVertical: 3, paddingHorizontal: 7, overflow: "hidden",
+      // The web chip's border is the accent at 45%.
+      borderWidth: 1, borderColor: `${c.amberText}73`, borderRadius: 6, paddingVertical: 3, paddingHorizontal: 7, overflow: "hidden",
     },
     rated: { color: c.dim, fontSize: 10, fontFamily: "monospace", letterSpacing: 1 },
     exMenuBtn: { marginLeft: "auto" },
@@ -1051,13 +1065,13 @@ const useS = makeStyles((c) =>
     btnRow: { flexDirection: "row", gap: 6 },
     btnDim: { opacity: 0.6 },
     btnText: { color: c.amberInk, fontWeight: "700", fontSize: 15 },
-    ghost: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12 },
-    ghostText: { color: c.muted, fontSize: 15 },
+    ghost: { paddingHorizontal: 18, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: c.line, alignItems: "center", justifyContent: "center" },
+    ghostText: { color: c.fg, fontSize: 15 },
     ghostOutline: {
       flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-      borderWidth: 1, borderColor: c.line, borderRadius: 12, paddingVertical: 11,
+      borderWidth: 1, borderColor: c.line, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 18,
     },
-    ghostOutlineText: { color: c.amberText, fontSize: 14.5, fontWeight: "600" },
+    ghostOutlineText: { color: c.fg, fontSize: 15 },
     actions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 10 },
 
     fbQ: { gap: 8 },
@@ -1079,17 +1093,17 @@ const useS = makeStyles((c) =>
     calDayTextDone: { color: c.fg },
     calDayTextAt: { color: c.amberText },
 
-    volScroll: { flexGrow: 1 },
-    vol: { flex: 1, gap: 8, marginTop: 4, marginBottom: 10 },
-    volRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-    volM: { flex: 1, minWidth: 84, color: c.muted, fontSize: 11, fontFamily: "monospace", letterSpacing: 0.6 },
+    vol: { gap: 8, marginTop: 4, marginBottom: 10 },
+    volRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+    volM: { flex: 1, minWidth: 0, color: c.muted, fontSize: 11, fontFamily: "monospace", letterSpacing: 0.6 },
     volH: { color: c.dim, fontSize: 9.5, fontFamily: "monospace", textAlign: "center" },
     volCell: { width: VOL_CELL },
-    volRange: { width: 50, textAlign: "right" },
+    volRange: { width: VOL_RANGE, textAlign: "right" },
     volN: { color: c.fg, fontSize: 15, textAlign: "center", fontVariant: ["tabular-nums"] },
     volOver: { color: c.attention },
     volUnder: { color: c.info },
-    volR: { width: 50, color: c.dim, fontSize: 10.5, fontFamily: "monospace", textAlign: "right" },
+    volPartial: { color: c.dim },
+    volR: { width: VOL_RANGE, color: c.dim, fontSize: 10.5, fontFamily: "monospace", textAlign: "right" },
 
     row: {
       flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: 12,
@@ -1098,7 +1112,7 @@ const useS = makeStyles((c) =>
     rowLabel: { color: c.muted, fontSize: 12.5, fontFamily: "monospace", letterSpacing: 1 },
     planEx: { color: c.fg, fontSize: 14.5, textAlign: "right", flexShrink: 1 },
 
-    bar: { height: 8, borderRadius: 999, backgroundColor: c.line, overflow: "hidden" },
+    bar: { height: 4, borderRadius: 999, backgroundColor: c.line, overflow: "hidden" },
     barFill: { height: "100%", borderRadius: 999, backgroundColor: c.amber },
 
     form: { gap: 12 },

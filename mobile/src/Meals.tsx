@@ -5,11 +5,11 @@ import { Meal, LoggedItem, deleteMeal, deleteMealItem, editMealItem, mealPhotoSo
 import { Sheet, Field } from "./Sheet";
 import { XIcon } from "./icons";
 
-// The meals behind Today's totals, mirroring the web FoodLog card: each meal
+// The meals behind the day's totals, mirroring the web FoodLog card: each meal
 // with its total, its items, and remove buttons for the whole meal or one
 // item. Tapping an item opens a small editor (name / kcal / protein) on the
 // same PATCH the agent's edit_food_item tool uses.
-export function MealsCard({ meals, onChanged }: { meals: Meal[] | null; onChanged: () => void }) {
+export function MealsCard({ meals, day, onChanged }: { meals: Meal[] | null; day: string; onChanged: () => void }) {
   const s = useS();
   const { c } = useTheme();
   const [busy, setBusy] = useState<string | null>(null);
@@ -41,11 +41,11 @@ export function MealsCard({ meals, onChanged }: { meals: Meal[] | null; onChange
 
   return (
     <View style={s.card}>
-      <Text style={s.cardLabel}>MEALS / TODAY</Text>
+      <Text style={s.cardLabel}>FOOD LOG / {day.toUpperCase()}</Text>
       {meals == null ? (
         <Text style={s.empty}>loading…</Text>
       ) : meals.length === 0 ? (
-        <Text style={s.empty}>no meals logged yet — tell the agent what you ate</Text>
+        <Text style={s.empty}>{day === "today" ? "no meals logged yet — tap + → nutrition" : "no meals logged this day"}</Text>
       ) : (
         meals.map((m, mi) => {
           const kcal = m.items.reduce((a, i) => a + i.kcal, 0);

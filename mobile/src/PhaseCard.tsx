@@ -90,11 +90,11 @@ export function PhaseCard({ phase, onChange }: { phase: Phase | null; onChange: 
       <View style={s.actions}>
         {phase && (
           <Pressable style={[s.actionGhost, busy && s.dim]} onPress={end} disabled={busy} accessibilityRole="button">
-            <Text style={s.actionGhostText}>END {phase.kind.toUpperCase()}</Text>
+            <Text style={s.actionGhostText}>End {phase.kind}</Text>
           </Pressable>
         )}
         <Pressable style={s.actionGhost} onPress={() => setEditing(true)} accessibilityRole="button">
-          <Text style={s.actionGhostText}>{phase ? "NEW PHASE" : "START A PHASE"}</Text>
+          <Text style={s.actionGhostText}>{phase ? "New phase" : "Start a phase"}</Text>
         </Pressable>
       </View>
       {/* Remounted per open so the fields start fresh, like the web sheet. */}
@@ -197,9 +197,10 @@ const useS = makeStyles((c) =>
     rowVal: { color: c.fg, fontSize: 17, fontWeight: "600" },
     unit: { color: c.muted, fontSize: 13, fontWeight: "400" },
     meta: { color: c.muted, fontSize: 12, fontFamily: "monospace", letterSpacing: 0.4, lineHeight: 17, marginTop: 6 },
-    actions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 10, marginTop: 14 },
-    actionGhost: { borderWidth: 1, borderColor: c.amberText, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14 },
-    actionGhostText: { color: c.amberText, fontSize: 11.5, fontFamily: "monospace", letterSpacing: 1, fontWeight: "700" },
+    // The web card's sheet-actions row of full-width ghost buttons.
+    actions: { flexDirection: "row", gap: 10, marginTop: 14 },
+    actionGhost: { flex: 1, alignItems: "center", borderWidth: 1, borderColor: c.line, borderRadius: 10, paddingVertical: 13 },
+    actionGhostText: { color: c.fg, fontSize: 15, fontWeight: "600" },
     dim: { opacity: 0.5 },
     warn: { color: c.attention, fontSize: 14, lineHeight: 20 },
     kinds: { flexDirection: "row", borderWidth: 1, borderColor: c.line, borderRadius: 12, padding: 3, gap: 3 },

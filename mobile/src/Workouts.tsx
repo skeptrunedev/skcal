@@ -6,7 +6,7 @@ import { XIcon } from "./icons";
 
 // The day's workouts, mirroring the web WorkoutLog card: each one's summary,
 // its description when that adds anything, and a remove button.
-export function WorkoutsCard({ workouts, onChanged }: { workouts: Workout[] | null; onChanged: () => void }) {
+export function WorkoutsCard({ workouts, day, onChanged }: { workouts: Workout[] | null; day: string; onChanged: () => void }) {
   const s = useS();
   const { c } = useTheme();
   const [busy, setBusy] = useState<string | null>(null);
@@ -33,11 +33,11 @@ export function WorkoutsCard({ workouts, onChanged }: { workouts: Workout[] | nu
 
   return (
     <View style={s.card}>
-      <Text style={s.cardLabel}>WORKOUTS / TODAY</Text>
+      <Text style={s.cardLabel}>WORKOUTS / {day.toUpperCase()}</Text>
       {workouts == null ? (
         <Text style={s.empty}>loading…</Text>
       ) : workouts.length === 0 ? (
-        <Text style={s.empty}>no workouts logged yet — tell the agent what you did</Text>
+        <Text style={s.empty}>{day === "today" ? "no workouts logged yet — tell the coach what you did" : "no workouts logged this day"}</Text>
       ) : (
         workouts.map((w, i) => (
           <View key={w.id} style={[s.row, i > 0 && s.rowBorder]}>
