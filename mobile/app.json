@@ -24,7 +24,7 @@
       [
         "@kingstinct/react-native-healthkit",
         {
-          "NSHealthShareUsageDescription": "skcal reads your weight and workouts from Apple Health so they are logged for you automatically \u2014 no manual entry.",
+          "NSHealthShareUsageDescription": "skcal reads your weight and workouts from Apple Health so they are logged for you automatically — no manual entry.",
           "NSHealthUpdateUsageDescription": "skcal does not write to Apple Health yet. This permission is reserved for a future option to save your logged weigh-ins back to Health.",
           "background": false
         }
@@ -46,6 +46,12 @@
         "projectId": "03af82f4-13a2-4717-9adb-9e51f4ce1718"
       }
     },
-    "owner": "skeptrunes-team"
+    "owner": "skeptrunes-team",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/03af82f4-13a2-4717-9adb-9e51f4ce1718"
+    }
   }
 }

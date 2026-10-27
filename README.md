@@ -40,6 +40,26 @@ npm run db:generate      # generate a D1 migration from src/db/schema.ts
 npm run db:migrate:local # apply migrations to the local D1
 ```
 
+## Mobile app
+
+`mobile/` is the Expo (SDK 57) iOS + Android app. Run `npm run web` there for a
+browser preview; set `SKCAL_API_ORIGIN=http://localhost:5173` to point it at the
+local worker instead of production.
+
+```bash
+cd mobile
+# JS-only change (screens, copy, styles): over-the-air, no store review
+npx eas-cli update --channel production --message "what changed"
+# native change (new native module, permission, SDK bump): new binaries
+npx eas-cli build -p all --profile production
+npx eas-cli submit -p ios --profile production       # TestFlight
+npx eas-cli submit -p android --profile production   # Play closed testing (alpha)
+```
+
+Updates are matched to binaries by a native **fingerprint**
+(`runtimeVersion.policy`), so an update only reaches builds it is compatible
+with; after a native change, ship a new build before publishing updates.
+
 ## API & OpenAPI
 
 The HTTP API is documented in-code: each route carries an `@openapi` JSDoc
