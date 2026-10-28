@@ -10,7 +10,9 @@ const WEB = Platform.OS === "web";
 
 // The Expo-web dev preview calls its own origin; metro.config.js forwards
 // /api to production (the worker sends no CORS headers).
-const BASE = WEB && __DEV__ ? "" : "https://app.skcal.fit";
+// EXPO_PUBLIC_API_BASE points a build at another worker (the `screenshots`
+// simulator profile talks to a local demo worker); store builds leave it unset.
+const BASE = process.env.EXPO_PUBLIC_API_BASE ?? (WEB && __DEV__ ? "" : "https://app.skcal.fit");
 const TOKEN_KEY = "skcal_session_token";
 
 // Sent on every request to the worker so it knows which app is calling. The
