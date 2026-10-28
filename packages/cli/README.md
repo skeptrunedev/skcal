@@ -19,7 +19,7 @@ npm install -g @skeptrune/skcal   # or: npx @skeptrune/skcal <cmd>
 ```
 
 Or grab a standalone binary (no Node required) for your platform from the
-[latest release](https://github.com/skeptrunedev/telemetry/releases).
+[latest release](https://github.com/skeptrunedev/skcal/releases).
 
 ## Usage
 

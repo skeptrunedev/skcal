@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/skeptrunedev/telemetry.git",
+    "url": "git+https://github.com/skeptrunedev/skcal.git",
     "directory": "packages/cli"
   },
   "homepage": "https://app.skcal.fit",

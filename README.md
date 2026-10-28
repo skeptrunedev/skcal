@@ -1,6 +1,6 @@
 # skcal
 
-[![CI](https://github.com/skeptrunedev/telemetry/actions/workflows/ci.yml/badge.svg)](https://github.com/skeptrunedev/telemetry/actions/workflows/ci.yml)
+[![CI](https://github.com/skeptrunedev/skcal/actions/workflows/ci.yml/badge.svg)](https://github.com/skeptrunedev/skcal/actions/workflows/ci.yml)
 
 A calorie and body-composition tracker built for **developers and AI power
 users** — weight, body circumferences, progress photos, and daily nutrition —

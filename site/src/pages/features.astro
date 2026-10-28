@@ -9,7 +9,7 @@ const APP = "https://app.skcal.fit";
 
 <Layout
   title="Features — skcal"
-  description="An AI coach that logs photos, weigh-ins, and workouts, remembers your preferences, and answers from your real numbers. Fully programmable underneath: MCP, CLI, typed API."
+  description="An AI coach that logs photos, weigh-ins, and workouts, runs self-adjusting hypertrophy mesocycles, and answers from your real numbers. Fully programmable underneath: MCP, CLI, typed API."
 >
   <Nav active="features" />
 
@@ -37,10 +37,6 @@ const APP = "https://app.skcal.fit";
           <h3>Advice from your actual day</h3>
           <p>"What should I eat tonight?" gets an answer computed from the calories and protein you have left, not generic tips.</p>
         </div>
-        <div class="ipoint">
-          <h3>Training that adapts</h3>
-          <p>Plan a mesocycle, log sets as you go, and rate how each muscle felt. Next week's volume adjusts to how you recovered.</p>
-        </div>
       </div>
       <img
         class="scene-img shot-light"
@@ -49,6 +45,45 @@ const APP = "https://app.skcal.fit";
         width="945"
         height="2055"
       />
+    </div>
+  </section>
+
+  <div class="wrap page-head sub-head">
+    <h1>Mesocycles that <span class="hl">program themselves</span>.</h1>
+    <p>Hypertrophy blocks in the Renaissance Periodization style: pick a split, lift, rate how it felt, and next week is written for you.</p>
+  </div>
+
+  <section class="wrap coach-feature">
+    <div class="coach-grid flip">
+      <img
+        class="scene-img shot-light"
+        src="/landing/ios-train.jpg"
+        alt="The skcal Train view on iPhone, week 2 day 2 of a mesocycle with logged squat sets, rest times, and a live rest timer"
+        width="945"
+        height="2055"
+      />
+      <div class="coach-points">
+        <div class="ipoint">
+          <h3>Start from a split, or build your own</h3>
+          <p>Full Body, Upper/Lower, Upper Body, or Push/Pull/Legs at 3 or 6 days. Blocks run 3 to 8 weeks and end with a deload. Swap any exercise or add your own.</p>
+        </div>
+        <div class="ipoint">
+          <h3>Volume follows your recovery</h3>
+          <p>Each muscle starts at its minimum effective volume. After a session you rate soreness, pump, joint pain, and workload, and next week adds sets, holds, or cuts them, never past what you can recover from.</p>
+        </div>
+        <div class="ipoint">
+          <h3>Weights and reps progress on their own</h3>
+          <p>Hit your reps and next week's target is about 2.5% heavier. Fall short and you keep the weight and chase one more rep.</p>
+        </div>
+        <div class="ipoint">
+          <h3>Effort ramps on schedule</h3>
+          <p>Reps in reserve drop from 3 to 0 across the block, then the deload halves your sets and reps so you start the next one fresh.</p>
+        </div>
+        <div class="ipoint">
+          <h3>Log it like you'd say it</h3>
+          <p>Tap through sets with a live rest timer, or tell the agent "squats 3x8 at 225" and it fills them in. It can plan a whole block for you too.</p>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -149,7 +184,7 @@ const APP = "https://app.skcal.fit";
         </div>
         <div class="srow">
           <span class="sname">MCP server</span>
-          <span class="sdesc">Eight tools for Claude, ChatGPT, Claude Code, or any MCP client.</span>
+          <span class="sdesc">Nine tools for Claude, ChatGPT, Claude Code, or any MCP client.</span>
           <a class="shref" href="/docs">skcal.fit/docs</a>
         </div>
         <div class="srow">
@@ -181,6 +216,9 @@ const APP = "https://app.skcal.fit";
     gap: clamp(36px, 5vw, 64px);
     align-items: center;
   }
+  .coach-grid.flip {
+    grid-template-columns: 0.9fr 1.1fr;
+  }
   .coach-points {
     display: flex;
     flex-direction: column;
@@ -201,7 +239,8 @@ const APP = "https://app.skcal.fit";
     padding-top: clamp(24px, 4vw, 40px);
   }
   @media (max-width: 860px) {
-    .coach-grid {
+    .coach-grid,
+    .coach-grid.flip {
       grid-template-columns: 1fr;
     }
     .coach-grid .scene-img {
