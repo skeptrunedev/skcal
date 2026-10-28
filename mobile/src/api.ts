@@ -10,8 +10,10 @@ const WEB = Platform.OS === "web";
 
 // The Expo-web dev preview calls its own origin; metro.config.js forwards
 // /api to production (the worker sends no CORS headers).
-// EXPO_PUBLIC_API_BASE points a build at another worker (the `screenshots`
-// simulator profile talks to a local demo worker); store builds leave it unset.
+// EXPO_PUBLIC_API_BASE points a build at another worker (e.g. a simulator
+// build for screenshots against a local demo worker); store builds leave it
+// unset. Set it as an EAS environment variable, not in eas.json: eas.json is
+// part of the runtime fingerprint, so editing it strands OTA updates.
 const BASE = process.env.EXPO_PUBLIC_API_BASE ?? (WEB && __DEV__ ? "" : "https://app.skcal.fit");
 const TOKEN_KEY = "skcal_session_token";
 

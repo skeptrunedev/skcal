@@ -27,12 +27,6 @@
       },
       "distribution": "internal",
       "channel": "simulator"
-    },
-    "screenshots": {
-      "extends": "simulator",
-      "env": {
-        "EXPO_PUBLIC_API_BASE": "http://127.0.0.1:5191"
-      }
     }
   },
   "submit": {
