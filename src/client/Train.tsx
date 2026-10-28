@@ -245,6 +245,9 @@ function SessionView({
   );
 }
 
+type Field = "w" | "r";
+type Carry = { from: number; value: string };
+
 function ExerciseCard({
   lib,
   session,
@@ -264,6 +267,18 @@ function ExerciseCard({
 }) {
   const [menu, setMenu] = useState(false);
   const [swapping, setSwapping] = useState(false);
+  // A weight / reps typed into a set carries down into the later sets, up to
+  // the next set typed into directly. Logged sets keep their own values.
+  const [carry, setCarry] = useState<{ w?: Carry; r?: Carry }>({});
+  const [typed, setTyped] = useState<Record<Field, number[]>>({ w: [], r: [] });
+  const carried = (field: Field, i: number) => {
+    const c = carry[field];
+    return c && i > c.from && !typed[field].some((t) => t > c.from && t <= i) ? c.value : undefined;
+  };
+  const onType = (field: Field, i: number, value: string) => {
+    setTyped((t) => (t[field].includes(i) ? t : { ...t, [field]: [...t[field], i] }));
+    setCarry((c) => ({ ...c, [field]: { from: i, value } }));
+  };
   const fb = session.feedback.find((f) => f.muscle === ex.muscle);
   const last = ex.lastWeek.map((x) => `${x.weightLb ?? 0}×${x.reps ?? 0}`).join(", ");
   const choices = (lib?.exercises ?? []).filter((e) => e.muscle === ex.muscle);
@@ -338,7 +353,17 @@ function ExerciseCard({
           <span>log</span>
         </div>
         {ex.sets.map((set, i) => (
-          <SetRow key={set.id} n={i + 1} set={set} hint={ex.lastWeek[i] ?? ex.lastWeek.at(-1)} onBeforeLog={onBeforeLog} onChanged={onChanged} />
+          <SetRow
+            key={set.id}
+            n={i + 1}
+            set={set}
+            hint={ex.lastWeek[i] ?? ex.lastWeek.at(-1)}
+            onBeforeLog={onBeforeLog}
+            onChanged={onChanged}
+            carryW={carried("w", i)}
+            carryR={carried("r", i)}
+            onType={(field, value) => onType(field, i, value)}
+          />
         ))}
       </div>
     </section>
@@ -351,12 +376,18 @@ function SetRow({
   hint,
   onBeforeLog,
   onChanged,
+  carryW,
+  carryR,
+  onType,
 }: {
   n: number;
   set: TrainingSet;
   hint: { weightLb: number | null; reps: number | null } | undefined;
   onBeforeLog: (then: () => void) => boolean;
   onChanged: () => Promise<void>;
+  carryW: string | undefined;
+  carryR: string | undefined;
+  onType: (field: Field, value: string) => void;
 }) {
   const [w, setW] = useState(set.weightLb != null ? String(set.weightLb) : "");
   const [r, setR] = useState(set.reps != null ? String(set.reps) : "");
@@ -365,6 +396,16 @@ function SetRow({
     setW(set.weightLb != null ? String(set.weightLb) : "");
     setR(set.reps != null ? String(set.reps) : "");
   }, [set.weightLb, set.reps]);
+  useEffect(() => {
+    if (carryW !== undefined && !set.done) setW(carryW);
+  }, [carryW, set.done]);
+  useEffect(() => {
+    if (carryR !== undefined && !set.done) setR(carryR);
+  }, [carryR, set.done]);
+  const type = (field: Field, value: string) => {
+    (field === "w" ? setW : setR)(value);
+    onType(field, value);
+  };
 
   const wHint = set.targetWeightLb ?? hint?.weightLb ?? null;
   const rHint = set.targetReps ?? hint?.reps ?? null;
@@ -400,7 +441,7 @@ function SetRow({
         aria-label={`Set ${n} weight in pounds`}
         placeholder={wHint != null ? String(wHint) : "lb"}
         value={w}
-        onChange={(e) => setW(e.target.value)}
+        onChange={(e) => type("w", e.target.value)}
         onBlur={blur}
       />
       <input
@@ -408,7 +449,7 @@ function SetRow({
         aria-label={`Set ${n} reps`}
         placeholder={rHint != null ? String(rHint) : "reps"}
         value={r}
-        onChange={(e) => setR(e.target.value)}
+        onChange={(e) => type("r", e.target.value)}
         onBlur={blur}
       />
       <button className={`train-log ${set.done ? "on" : ""}`} onClick={toggle} disabled={busy} aria-label={set.done ? `Unlog set ${n}` : `Log set ${n}`} aria-pressed={set.done}>

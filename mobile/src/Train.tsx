@@ -322,6 +322,9 @@ function SessionView({
 
 type Ex = TrainingSession["exercises"][number];
 
+type Field = "w" | "r";
+type Carry = { from: number; value: string };
+
 function ExerciseCard({
   lib,
   session,
@@ -343,6 +346,18 @@ function ExerciseCard({
   const { c } = useTheme();
   const [menu, setMenu] = useState(false);
   const [swapping, setSwapping] = useState(false);
+  // A weight / reps typed into a set carries down into the later sets, up to
+  // the next set typed into directly. Logged sets keep their own values.
+  const [carry, setCarry] = useState<{ w?: Carry; r?: Carry }>({});
+  const [typed, setTyped] = useState<Record<Field, number[]>>({ w: [], r: [] });
+  const carried = (field: Field, i: number) => {
+    const c = carry[field];
+    return c && i > c.from && !typed[field].some((t) => t > c.from && t <= i) ? c.value : undefined;
+  };
+  const onType = (field: Field, i: number, value: string) => {
+    setTyped((t) => (t[field].includes(i) ? t : { ...t, [field]: [...t[field], i] }));
+    setCarry((c) => ({ ...c, [field]: { from: i, value } }));
+  };
   const [err, setErr] = useState<string | null>(null);
   const fb = session.feedback.find((f) => f.muscle === ex.muscle);
   const last = ex.lastWeek.map((x) => `${x.weightLb ?? 0}×${x.reps ?? 0}`).join(", ");
@@ -401,6 +416,9 @@ function ExerciseCard({
             onBeforeLog={onBeforeLog}
             onChanged={onChanged}
             onError={setErr}
+            carryW={carried("w", i)}
+            carryR={carried("r", i)}
+            onType={(field, value) => onType(field, i, value)}
           />
         ))}
       </View>
@@ -428,6 +446,9 @@ function SetRow({
   onBeforeLog,
   onChanged,
   onError,
+  carryW,
+  carryR,
+  onType,
 }: {
   n: number;
   set: TrainingSet;
@@ -435,6 +456,9 @@ function SetRow({
   onBeforeLog: (then: () => void) => boolean;
   onChanged: () => Promise<void>;
   onError: (e: string | null) => void;
+  carryW: string | undefined;
+  carryR: string | undefined;
+  onType: (field: Field, value: string) => void;
 }) {
   const s = useS();
   const { c } = useTheme();
@@ -445,6 +469,16 @@ function SetRow({
     setW(set.weightLb != null ? String(set.weightLb) : "");
     setR(set.reps != null ? String(set.reps) : "");
   }, [set.weightLb, set.reps]);
+  useEffect(() => {
+    if (carryW !== undefined && !set.done) setW(carryW);
+  }, [carryW, set.done]);
+  useEffect(() => {
+    if (carryR !== undefined && !set.done) setR(carryR);
+  }, [carryR, set.done]);
+  const type = (field: Field, value: string) => {
+    (field === "w" ? setW : setR)(value);
+    onType(field, value);
+  };
 
   const wHint = set.targetWeightLb ?? hint?.weightLb ?? null;
   const rHint = set.targetReps ?? hint?.reps ?? null;
@@ -486,7 +520,7 @@ function SetRow({
           placeholder={wHint != null ? String(wHint) : "lb"}
           placeholderTextColor={c.dim}
           value={w}
-          onChangeText={setW}
+          onChangeText={(v) => type("w", v)}
           onBlur={blur}
           returnKeyType="done"
         />
@@ -497,7 +531,7 @@ function SetRow({
           placeholder={rHint != null ? String(rHint) : "reps"}
           placeholderTextColor={c.dim}
           value={r}
-          onChangeText={setR}
+          onChangeText={(v) => type("r", v)}
           onBlur={blur}
           returnKeyType="done"
         />
