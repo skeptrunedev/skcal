@@ -1,0 +1,19 @@
+---
+// Official App Store / Google Play install badges, sized to the same height.
+export const APP_STORE = "https://apps.apple.com/us/app/skcal/id6789390978";
+export const GOOGLE_PLAY = "https://play.google.com/store/apps/details?id=fit.skcal.app";
+
+interface Props {
+  class?: string;
+}
+const { class: klass = "" } = Astro.props;
+---
+
+<div class={`store-badges ${klass}`}>
+  <a href={APP_STORE} aria-label="Download skcal on the App Store">
+    <img src="/badges/app-store.svg" alt="Download on the App Store" width="144" height="48" />
+  </a>
+  <a href={GOOGLE_PLAY} aria-label="Get skcal on Google Play">
+    <img src="/badges/google-play.png" alt="Get it on Google Play" width="161" height="48" />
+  </a>
+</div>

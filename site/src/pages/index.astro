@@ -4,6 +4,7 @@ import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
 import CodeChip from "../components/CodeChip.astro";
 import CtaBand from "../components/CtaBand.astro";
+import StoreBadges from "../components/StoreBadges.astro";
 
 const APP = "https://app.skcal.fit";
 ---
@@ -24,6 +25,7 @@ const APP = "https://app.skcal.fit";
           <a class="btn textme-number" href="sms:+16283166355?&body=hi">Text +1 (628) 316-6355</a>
         </div>
         <p class="hero-note"># text anything to start — your food, weight, or just "hi". or <a href={APP}>start in the browser</a>.</p>
+        <StoreBadges class="hero-badges" />
       </div>
       <img
         class="scene-img shot-light"
