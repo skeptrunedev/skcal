@@ -872,7 +872,23 @@ async function recomputeDay(c: { env: Bindings }, email: string, date: string) {
 // cookie, or a session lookup comes back empty while a session cookie was
 // presented, expire the host-only variant alongside.
 const SESSION_COOKIE_RE = /(__Secure-)?better-auth\.session_token=/;
+// The native apps authenticate with the bearer token alone, but the OS HTTP
+// stack (NSURLSession / OkHttp) keeps the session cookie /verify sets and
+// replays it with no Origin header. Better Auth rejects any cookie-bearing
+// request without an Origin (403 MISSING_OR_NULL_ORIGIN), so anyone who signed
+// out could never get a new code. A cross-site page can't send x-skcal-client
+// without a CORS preflight we never grant, so dropping cookies for it keeps
+// the CSRF guarantee.
+function isNativeClient(req: Request): boolean {
+  const client = req.headers.get("x-skcal-client");
+  return client === "ios" || client === "android";
+}
 app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+  if (isNativeClient(c.req.raw)) {
+    const headers = new Headers(c.req.raw.headers);
+    headers.delete("cookie");
+    return makeAuth(c.env).handler(new Request(c.req.raw, { headers }));
+  }
   const res = await makeAuth(c.env).handler(c.req.raw);
   const reqCookies = c.req.header("cookie") ?? "";
   if (!SESSION_COOKIE_RE.test(reqCookies)) return res;

@@ -252,6 +252,39 @@ export async function workerFetchStripe(path: string, init: RequestInit = {}): P
   return instance.dispatchFetch(`http://example.com${path}`, init as never) as unknown as Promise<Response>;
 }
 
+// A fifth instance with dev bypass OFF and Twilio Verify answered by a local
+// fake, so phone sign-up runs the production path end to end: send-otp starts
+// a verification, verify checks it, and a brand-new number mints an account.
+// The fake approves only TWILIO_TEST_CODE; twilioCalls records what was sent.
+export const TWILIO_TEST_CODE = "424242";
+export const twilioCalls: { path: string; to: string }[] = [];
+let mfTwilio: Miniflare | undefined;
+
+async function getMiniflareTwilio(): Promise<Miniflare> {
+  if (!mfTwilio) {
+    mfTwilio = await makeInstance(
+      false,
+      { TWILIO_API_KEY_SID: "SKtest", TWILIO_API_KEY_SECRET: "test", TWILIO_VERIFY_SERVICE_SID: "VAtest" },
+      async (request) => {
+        const url = new URL(request.url);
+        if (url.hostname !== "verify.twilio.com") return new Response("unexpected outbound fetch", { status: 599 });
+        const form = new URLSearchParams(await request.text());
+        const path = url.pathname.split("/").pop() ?? "";
+        twilioCalls.push({ path, to: form.get("To") ?? "" });
+        const status = path === "VerificationCheck" && form.get("Code") !== TWILIO_TEST_CODE ? "pending" : "approved";
+        return new Response(JSON.stringify({ status: path === "Verifications" ? "pending" : status }), { status: 200 });
+      },
+    );
+  }
+  return mfTwilio;
+}
+
+/** Dispatch to the production-like Worker whose Twilio calls go to the local fake. */
+export async function workerFetchTwilio(path: string, init: RequestInit = {}): Promise<Response> {
+  const instance = await getMiniflareTwilio();
+  return instance.dispatchFetch(`http://example.com${path}`, init as never) as unknown as Promise<Response>;
+}
+
 /** Tear down the shared instances (called from a global afterAll). */
 export async function disposeMiniflare(): Promise<void> {
   if (mf) {
@@ -269,5 +302,9 @@ export async function disposeMiniflare(): Promise<void> {
   if (mfStripe) {
     await mfStripe.dispose();
     mfStripe = undefined;
+  }
+  if (mfTwilio) {
+    await mfTwilio.dispose();
+    mfTwilio = undefined;
   }
 }
