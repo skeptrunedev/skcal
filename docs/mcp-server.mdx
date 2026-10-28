@@ -5,7 +5,7 @@ description: "Connect skcal to Claude, Claude Code, or ChatGPT over a remote MCP
 
 skcal exposes a remote [Model Context Protocol](https://modelcontextprotocol.io)
 server so AI clients can log and query your data. It uses **Streamable HTTP**
-and is guarded by **OAuth 2.1** — you sign in once in the browser to authorize,
+and is guarded by **OAuth 2.1**: you sign in once in the browser to authorize,
 with no token to copy or paste.
 
 <Info>
@@ -53,7 +53,7 @@ authorize.
 
 <Note>
 Claude and ChatGPT don't support a one-click install link for custom connectors
-yet — the links above open the connector settings, then you paste the URL.
+yet. The links above open the connector settings, then you paste the URL.
 Claude Code (the command above) installs directly.
 </Note>
 
@@ -72,6 +72,7 @@ these instructions with the correct URL for your deployment.
 | `skcal_log_weight` | Record a weigh-in |
 | `skcal_log_measurement` | Record a body measurement |
 | `skcal_log_meal` | Log a food item with calories + protein |
+| `skcal_log_workout` | Log a workout from a plain-text description |
 | `skcal_list_meals` | List meals logged on a day |
 | `skcal_move_food` | Move a meal or item to another day |
 
@@ -81,4 +82,4 @@ The server advertises OAuth discovery at
 `/.well-known/oauth-authorization-server` and
 `/.well-known/oauth-protected-resource`. Clients register dynamically, run the
 PKCE authorization-code flow against your skcal login, and receive a token
-scoped to your account — the same login used by the web app and CLI.
+scoped to your account. It's the same login the apps and CLI use.

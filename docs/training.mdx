@@ -1,0 +1,77 @@
+---
+title: "Training"
+description: "Hypertrophy mesocycles that plan next week's sets, reps, and load from what you lifted and how you recovered."
+---
+
+skcal runs hypertrophy training blocks (mesocycles) modeled on Renaissance
+Periodization. You pick a split and lift. After each session you say how each
+muscle felt, and skcal writes next week for you.
+
+## Plan a mesocycle
+
+Open **Train → Mesocycles** in the app and start a new one, or ask the agent
+("plan me a 5-week upper/lower block"). Choose a split template or build your
+own days from muscle slots.
+
+| Template | Key | Days per week |
+| --- | --- | --- |
+| Full Body | `full_body_3` | 3 |
+| Upper / Lower | `upper_lower_4` | 4 |
+| Upper Body | `upper_focus_4` | 4 |
+| Push / Pull / Legs | `ppl_3` | 3 |
+| Push / Pull / Legs | `ppl_6` | 6 |
+
+A mesocycle runs 3 to 8 weeks (5 by default), and the last week is always a
+deload. Only one mesocycle is active at a time. Each slot gets a default
+exercise from the built-in library. You can swap it for another exercise or one
+you add yourself.
+
+## How each week is planned
+
+<Steps>
+  <Step title="Week 1 starts at minimum effective volume">
+    Each muscle starts at its MEV (minimum effective volume) for the week,
+    split across the slots that train it, at 3 reps in reserve (RIR).
+  </Step>
+  <Step title="Effort ramps across the block">
+    The RIR target drops evenly from 3 in week 1 to 0 in the last week before
+    the deload.
+  </Step>
+  <Step title="Volume follows your feedback">
+    After a session, rate each muscle's soreness, pump, joint pain, and
+    workload. Recovered muscles with a weak stimulus get up to 2 more sets next
+    week. Muscles that were still sore, at their limit, or in pain hold or lose a
+    set. Volume never goes past the muscle's MRV (maximum recoverable volume).
+    With no feedback, a muscle you trained gets one more set.
+  </Step>
+  <Step title="Load and reps progress from what you lifted">
+    Hit your target reps and next week's target weight goes up about 2.5% (at
+    least 5 lb). Bodyweight and band moves add a rep instead. Miss by 1 or 2
+    reps and you keep the weight and aim for one more rep. Miss by more and you
+    keep the weight and match what you did.
+  </Step>
+  <Step title="Deload">
+    The final week keeps half the sets at the same load for half the reps.
+  </Step>
+</Steps>
+
+## Log sets
+
+In the app, tap through each set's weight and reps. **Train** shows a live rest
+timer and your average rest for the session. You can also just tell the agent
+what you did: "bench 185 for 8, 8, 7" fills in the matching exercise's sets in
+your next session, and adds sets if you did more than planned.
+
+Over the API, the same thing is one call:
+
+```bash
+curl -X POST https://app.skcal.fit/api/training/log \
+  -H "Authorization: Bearer skcal_your_key_here" \
+  -H "content-type: application/json" \
+  -d '{"exercise": "bench", "sets": [{"weightLb": 185, "reps": 8}, {"weightLb": 185, "reps": 8}, {"weightLb": 185, "reps": 7}]}'
+```
+
+`GET /api/training/current` returns your next session with its targets and last
+week's results. API keys need the `training:read` or `training:write` scope.
+See the **Training** section of the [API reference](/api-reference/introduction)
+for every endpoint.

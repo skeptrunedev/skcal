@@ -1,21 +1,45 @@
 ---
 title: "Quickstart"
-description: "Sign in, log your first entries, and connect skcal to your tools."
+description: "Get the app, sign in with your phone number, log your first entries, and connect skcal to your tools."
 ---
 
-## 1. Sign in
+## 1. Get the app
 
-Open [app.skcal.fit](https://app.skcal.fit) and sign in with Google
-or an email magic link. Your data is scoped to your account.
+Install skcal on [iPhone](https://apps.apple.com/us/app/skcal/id6789390978) or
+[Android](https://play.google.com/store/apps/details?id=fit.skcal.app), or open
+[app.skcal.fit](https://app.skcal.fit) in a browser. All three use the same
+account.
 
-## 2. Set your targets
+## 2. Sign in
 
-On the web app, log a weigh-in and set your daily calorie + protein targets and
-goal weight. The dashboard tracks everything against these.
+Enter your phone number and the 6-digit code we text you. There's no password,
+and a new number creates an account. Your data is scoped to that account.
 
-## 3. Log from wherever you are
+<Note>
+Sign-in works with US and Canadian (+1) numbers for now.
+</Note>
+
+## 3. Set your targets
+
+Log a weigh-in and set your daily calorie and protein targets and goal weight.
+Today tracks everything against these. You can also start a cut, bulk, or
+maintenance phase to see whether your weekly rate of change is on track.
+
+## 4. Log from wherever you are
 
 <Tabs>
+  <Tab title="App">
+    Snap a meal, type "158.2 this morning", or ask the agent "what should I eat
+    for dinner?". To lift on a plan, open **Train** and start a mesocycle (see
+    [Training](/training)).
+  </Tab>
+  <Tab title="MCP (agents)">
+    ```bash
+    claude mcp add --transport http skcal https://app.skcal.fit/mcp
+    ```
+    Then ask your agent things like "what's my status today?" or "log 160 lb."
+    See [Install the MCP server](/mcp-server) for Claude, Claude Code, and ChatGPT.
+  </Tab>
   <Tab title="CLI">
     ```bash
     npm install -g @skeptrune/skcal
@@ -26,32 +50,23 @@ goal weight. The dashboard tracks everything against these.
     ```
     See [Install the CLI](/cli) for the full command list.
   </Tab>
-  <Tab title="MCP (agents)">
-    ```bash
-    claude mcp add --transport http skcal https://app.skcal.fit/mcp
-    ```
-    Then ask your agent things like "what's my status today?" or "log 160 lb."
-    See [Install the MCP server](/mcp-server) for Claude, Claude Code, and ChatGPT.
-  </Tab>
   <Tab title="HTTP API">
-    Every request is scoped to your account (see [Authentication](/authentication)).
-    The scale-ingest endpoint takes a bearer token:
+    Create an API key in the app under **profile → API keys**, then:
 
     ```bash
-    curl -X POST https://app.skcal.fit/api/ingest/weight \
-      -H "Authorization: Bearer $INGEST_TOKEN" \
-      -H "content-type: application/json" \
-      -d '{"weightKg": 72.6}'
+    curl https://app.skcal.fit/api/dashboard \
+      -H "Authorization: Bearer skcal_your_key_here"
     ```
-    Browse everything in the [API reference](/api-reference/introduction).
+    See [Authentication](/authentication) and the
+    [API reference](/api-reference/introduction).
   </Tab>
 </Tabs>
 
 ## Next steps
 
 <CardGroup cols={2}>
-  <Card title="Install the CLI" icon="terminal" href="/cli" />
+  <Card title="Training" icon="dumbbell" href="/training" />
   <Card title="Install the MCP server" icon="plug" href="/mcp-server" />
-  <Card title="Authentication" icon="key" href="/authentication" />
+  <Card title="Install the CLI" icon="terminal" href="/cli" />
   <Card title="API reference" icon="code" href="/api-reference/introduction" />
 </CardGroup>

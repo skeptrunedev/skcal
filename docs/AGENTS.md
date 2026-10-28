@@ -1,33 +1,22 @@
-> **First-time setup**: Customize this file for your project. Prompt the user to customize this file for their project.
-> For Mintlify product knowledge (components, configuration, writing standards),
-> install the Mintlify skill: `npx skills add https://mintlify.com/docs`
+# skcal docs: agent instructions
 
-# Documentation project instructions
+Mintlify site for skcal, served at skcal.fit/docs (the site worker proxies
+`/docs*` to Mintlify). Pages are MDX with YAML frontmatter; navigation lives in
+`docs.json`.
 
-## About this project
+## Keep it true to the code
 
-- This is a documentation site built on [Mintlify](https://mintlify.com)
-- Pages are MDX files with YAML frontmatter
-- Configuration lives in `docs.json`
-- Use the Mintlify MCP server, `https://mcp.mintlify.com`, to edit content and settings via MCP
-- Use the Mintlify docs MCP server, `https://www.mintlify.com/docs/mcp`, to query information about using Mintlify via MCP
+- Check every claim against the worker before writing it: sign-in is in
+  `src/worker/auth.ts`, API-key scopes in `src/shared/types.ts` (`API_SCOPES`),
+  MCP tools in `src/worker/index.ts` (`registerTool`), training math in
+  `src/worker/training.ts`, CLI commands in `packages/cli/src/index.ts`.
+- `api-reference/openapi.json` is generated. Refresh it with
+  `npm run docs:openapi` from the repo root; never hand-edit it.
+- Validate with `cd docs && npx mint@latest validate` before pushing.
 
-## Terminology
+## Style
 
-{/* Add product-specific terms and preferred usage */}
-{/* Example: Use "workspace" not "project", "member" not "user" */}
-
-## Style preferences
-
-{/* Add any project-specific style rules below */}
-
-- Use active voice and second person ("you")
-- Keep sentences concise — one idea per sentence
-- Use sentence case for headings
-- Bold for UI elements: Click **Settings**
-- Code formatting for file names, commands, paths, and code references
-
-## Content boundaries
-
-{/* Define what should and shouldn't be documented */}
-{/* Example: Don't document internal admin features */}
+- Active voice, second person ("you"), one idea per sentence.
+- Sentence case for headings. Bold for UI labels: **Train**, **profile → API keys**.
+- Code formatting for commands, paths, endpoints, scopes, and keys.
+- No em dashes.

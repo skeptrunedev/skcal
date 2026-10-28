@@ -3,18 +3,29 @@ title: "Authentication"
 description: "How skcal authenticates the app, the CLI, agents, and the scale ingest."
 ---
 
-skcal uses [Better Auth](https://better-auth.com) with Google sign-in and email
-magic links. Every request is scoped to the signed-in account, so you only ever
-see your own data.
+skcal uses [Better Auth](https://better-auth.com) with phone-number sign-in:
+you enter your number, we text a 6-digit code, and a new number creates an
+account. Every request is scoped to the signed-in account, so you only ever see
+your own data.
+
+<Note>
+Sign-in works with US and Canadian (+1) numbers for now.
+</Note>
 
 ## Web app
 
 Signing in sets a secure, HttpOnly session cookie. Browser requests to the API
-carry it automatically — nothing to configure.
+carry it automatically, so there's nothing to configure.
+
+## iPhone and Android apps
+
+The mobile apps sign in the same way, then send the session as
+`Authorization: Bearer <token>` instead of a cookie.
 
 ## CLI
 
-`skcal login` runs the browser sign-in and caches a token locally, which the
+`skcal login` opens your browser to sign in with your phone number, then caches
+an OAuth token locally, which the
 [CLI](/cli) replays on each request. See the CLI page for details.
 
 ## API keys (programmatic access)
@@ -35,12 +46,13 @@ outside a key's scopes returns `403`. Scopes:
 | weight | `weight:read`, `weight:write` |
 | measurements | `measurements:read`, `measurements:write` |
 | nutrition | `nutrition:read`, `nutrition:write` |
-| targets | `targets:read`, `targets:write` |
+| targets (and phases) | `targets:read`, `targets:write` |
+| training | `training:read`, `training:write` |
 | dashboard | `dashboard:read` |
 | agent | `agent:read`, `agent:write` |
 
 <Note>
-The full key is shown only once at creation — copy it then. Keys can't manage
+The full key is shown only once at creation, so copy it then. Keys can't manage
 other keys; key management requires a signed-in session. Revoke a key any time
 from the same screen.
 </Note>
@@ -50,7 +62,7 @@ from the same screen.
 The [MCP server](/mcp-server) is authorized with OAuth 2.1. Clients discover the
 endpoints, register dynamically, run the PKCE authorization-code flow against
 your skcal login, and receive a token scoped to your account. This is the
-smoothest path for AI clients specifically.
+smoothest path for AI clients.
 
 ## Scale ingest
 
@@ -65,6 +77,6 @@ curl -X POST https://app.skcal.fit/api/ingest/weight \
 ```
 
 <Note>
-The rest of the API is guarded by the session cookie (web app / CLI), a bearer
-API key, or an MCP OAuth token.
+The rest of the API is guarded by a session (cookie on the web, bearer token in
+the mobile apps), the CLI's OAuth token, a bearer API key, or an MCP OAuth token.
 </Note>

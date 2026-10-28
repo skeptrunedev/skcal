@@ -15,11 +15,24 @@
         "groups": [
           {
             "group": "Get started",
-            "pages": ["index", "quickstart", "authentication"]
+            "pages": [
+              "index",
+              "quickstart",
+              "authentication"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "training"
+            ]
           },
           {
             "group": "Integrate",
-            "pages": ["mcp-server", "cli"]
+            "pages": [
+              "mcp-server",
+              "cli"
+            ]
           }
         ]
       },
@@ -28,7 +41,9 @@
         "groups": [
           {
             "group": "Overview",
-            "pages": ["api-reference/introduction"]
+            "pages": [
+              "api-reference/introduction"
+            ]
           },
           {
             "group": "Endpoints",
@@ -43,12 +58,6 @@
     "dark": "/logo/dark.svg"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "GitHub",
-        "href": "https://github.com/skeptrunedev/telemetry"
-      }
-    ],
     "primary": {
       "type": "button",
       "label": "Open skcal",
@@ -56,19 +65,40 @@
     }
   },
   "contextual": {
-    "options": ["copy", "view", "download-spec", "chatgpt", "claude", "mcp"]
+    "options": [
+      "copy",
+      "view",
+      "download-spec",
+      "chatgpt",
+      "claude",
+      "mcp"
+    ]
   },
   "footer": {
-    "socials": {
-      "github": "https://github.com/skeptrunedev/telemetry"
-    },
     "links": [
       {
         "header": "skcal",
         "items": [
-          { "label": "App", "href": "https://app.skcal.fit" },
-          { "label": "Privacy", "href": "https://app.skcal.fit/privacy" },
-          { "label": "Terms", "href": "https://app.skcal.fit/terms" }
+          {
+            "label": "App",
+            "href": "https://app.skcal.fit"
+          },
+          {
+            "label": "iPhone",
+            "href": "https://apps.apple.com/us/app/skcal/id6789390978"
+          },
+          {
+            "label": "Android",
+            "href": "https://play.google.com/store/apps/details?id=fit.skcal.app"
+          },
+          {
+            "label": "Privacy",
+            "href": "https://skcal.fit/privacy"
+          },
+          {
+            "label": "Terms",
+            "href": "https://skcal.fit/terms"
+          }
         ]
       }
     ]

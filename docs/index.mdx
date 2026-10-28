@@ -1,19 +1,20 @@
 ---
 title: "skcal"
-description: "Calorie and body-composition tracking for developers and AI power users."
+description: "The AI-native way to manage your health: nutrition, body weight, and training in one account you can drive from an app, an agent, or code."
 ---
 
-skcal tracks weigh-ins, body measurements, and nutrition, and gives you a daily
-snapshot of where you stand against your targets. It's built to be driven by
-software: a typed HTTP API, a CLI, and a remote MCP server so your agents can
-log and query your data.
+skcal tracks weigh-ins, body measurements, meals, and training, and gives you a
+daily snapshot of where you stand against your targets. An agent logs things for
+you and answers from your real numbers. Underneath, everything is a typed HTTP
+API, a CLI, and a remote MCP server, so your own tools and agents can do the
+same.
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Sign in and make your first calls.
+    Get the app, sign in, and log your first entries.
   </Card>
-  <Card title="Install the CLI" icon="terminal" href="/cli">
-    `@skeptrune/skcal` — log and query from your terminal.
+  <Card title="Training" icon="dumbbell" href="/training">
+    Mesocycles that plan next week from how this one went.
   </Card>
   <Card title="Install the MCP server" icon="plug" href="/mcp-server">
     Connect skcal to Claude, Claude Code, or ChatGPT.
@@ -25,16 +26,24 @@ log and query your data.
 
 ## What you can do
 
-- **Log** weigh-ins (with optional body-fat % and notes), body measurements, and meals.
-- **Estimate meal macros** from a photo or a plain-text description.
-- **Track** calories and protein against daily targets, and weight against a goal.
-- **Ask the agent** for a blunt read on what to eat, grounded in your real numbers.
+- **Log meals** from a photo, a pasted screenshot, or a plain-text description. skcal estimates calories and protein per item.
+- **Log your body**: weigh-ins (with optional body-fat % and notes) and body measurements, or let a smart scale push them.
+- **Track** calories and protein against daily targets, and weight against a goal, with cut, bulk, or maintenance phases.
+- **Train** with self-adjusting hypertrophy mesocycles: sets, reps, and load progress from what you lifted and how you recovered.
+- **Ask the agent** what to eat or how training is going. It reads and edits your log, so its answers come from your real numbers.
 
 ## Ways to use it
 
 | Surface | Best for |
 | --- | --- |
-| [Web app](https://app.skcal.fit) | Day-to-day logging and the agent chat |
-| [CLI](/cli) | Scripting and terminal logging |
+| [iPhone](https://apps.apple.com/us/app/skcal/id6789390978) and [Android](https://play.google.com/store/apps/details?id=fit.skcal.app) apps | Day-to-day logging, training, and the agent |
+| [Web app](https://app.skcal.fit) | The same, in a browser |
 | [MCP server](/mcp-server) | Letting an AI client log and query your data |
+| [CLI](/cli) | Scripting and terminal logging |
 | [HTTP API](/api-reference/introduction) | Custom integrations |
+
+<Note>
+skcal is $10 a month for everything, with no free tier. Subscribe in the app:
+on the web it bills through Stripe, and in the mobile apps through the App Store
+or Google Play.
+</Note>

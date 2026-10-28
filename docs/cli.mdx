@@ -4,7 +4,7 @@ description: "Log weigh-ins, meals, and measurements from your terminal with @sk
 ---
 
 `@skeptrune/skcal` is a terminal client for skcal. It logs weigh-ins, meals, and
-measurements and prints your daily snapshot — handy for scripting and wiring
+measurements and prints your daily snapshot. It's handy for scripting and wiring
 into your own tooling.
 
 ## Install
@@ -22,7 +22,7 @@ npx @skeptrune/skcal <command>
 </CodeGroup>
 
 Prefer no Node? Grab a standalone binary for your platform from the
-[latest release](https://github.com/skeptrunedev/telemetry/releases).
+[latest release](https://github.com/skeptrunedev/skcal/releases).
 
 ## Sign in
 
@@ -30,7 +30,7 @@ Prefer no Node? Grab a standalone binary for your platform from the
 skcal login
 ```
 
-This opens your browser to sign in (Google or magic link) and caches the session
+This opens your browser to sign in with your phone number and caches the token
 locally.
 
 ### Authenticate with an API key
@@ -39,8 +39,8 @@ For scripts and CI, use a [bearer API key](/authentication) instead of the
 browser flow:
 
 ```bash
-skcal login --api-key skcal_your_key_here      # caches the key, or…
-export SKCAL_API_KEY=skcal_your_key_here        # …use the env var (no login)
+skcal login --api-key skcal_your_key_here      # caches the key, or
+export SKCAL_API_KEY=skcal_your_key_here        # use the env var (no login)
 ```
 
 Create and scope keys in the app under **profile → API keys**.
