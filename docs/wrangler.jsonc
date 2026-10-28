@@ -1,0 +1,17 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  // Static-assets-only Worker serving the Blume docs build. It has no route of
+  // its own: the skcal.fit worker (site/) forwards /docs* here over a service
+  // binding, so the docs live at skcal.fit/docs.
+  "name": "skcal-docs",
+  "account_id": "2f016a113dca4bbf3eda769b3f7d12fd",
+  "compatibility_date": "2026-06-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  // `bun run stage` lays the build out the way requests arrive: pages under
+  // docs/ (Blume builds for base /docs) and Blume's _headers and _redirects at
+  // the root, the only place Cloudflare reads them. Blume writes each page as
+  // <route>/index.html and links to it without a trailing slash; the default
+  // auto-trailing-slash would 307 every link.
+  "assets": { "directory": "./.cloudflare", "html_handling": "drop-trailing-slash", "not_found_handling": "404-page" }
+}

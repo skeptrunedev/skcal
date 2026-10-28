@@ -8,9 +8,9 @@ you enter your number, we text a 6-digit code, and a new number creates an
 account. Every request is scoped to the signed-in account, so you only ever see
 your own data.
 
-<Note>
+:::note
 Sign-in works with US and Canadian (+1) numbers for now.
-</Note>
+:::
 
 ## Web app
 
@@ -51,11 +51,11 @@ outside a key's scopes returns `403`. Scopes:
 | dashboard | `dashboard:read` |
 | agent | `agent:read`, `agent:write` |
 
-<Note>
+:::note
 The full key is shown only once at creation, so copy it then. Keys can't manage
 other keys; key management requires a signed-in session. Revoke a key any time
 from the same screen.
-</Note>
+:::
 
 ## Agents (MCP)
 
@@ -76,7 +76,7 @@ curl -X POST https://app.skcal.fit/api/ingest/weight \
   -d '{"weightKg": 72.6}'
 ```
 
-<Note>
+:::note
 The rest of the API is guarded by a session (cookie on the web, bearer token in
 the mobile apps), the CLI's OAuth token, a bearer API key, or an MCP OAuth token.
-</Note>
+:::

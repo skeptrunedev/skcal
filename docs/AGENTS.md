@@ -1,8 +1,10 @@
 # skcal docs: agent instructions
 
-Mintlify site for skcal, served at skcal.fit/docs (the site worker proxies
-`/docs*` to Mintlify). Pages are MDX with YAML frontmatter; navigation lives in
-`docs.json`.
+[Blume](https://useblume.dev) site for skcal, served at skcal.fit/docs (the
+site worker forwards `/docs*` to the `skcal-docs` worker). Pages are MDX under
+`content/`; the sidebar comes from the folder tree and each group's `meta.ts`.
+Config lives in `blume.config.ts`. Blume's own agent skills and docs ship in
+`node_modules/blume/skills` and `node_modules/blume/docs`.
 
 ## Keep it true to the code
 
@@ -10,9 +12,10 @@ Mintlify site for skcal, served at skcal.fit/docs (the site worker proxies
   `src/worker/auth.ts`, API-key scopes in `src/shared/types.ts` (`API_SCOPES`),
   MCP tools in `src/worker/index.ts` (`registerTool`), training math in
   `src/worker/training.ts`, CLI commands in `packages/cli/src/index.ts`.
-- `api-reference/openapi.json` is generated. Refresh it with
-  `npm run docs:openapi` from the repo root; never hand-edit it.
-- Validate with `cd docs && npx mint@latest validate` before pushing.
+- The API reference is generated from `../src/worker/openapi.gen.json`. Refresh
+  it with `npm run openapi:gen` from the repo root; never hand-edit it.
+- Run `bun run build` and `bun run validate` in `docs/` before pushing.
+- Use `:::note` / `:::tip` directives for callouts and Lucide icon names.
 
 ## Style
 

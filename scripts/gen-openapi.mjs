@@ -23,22 +23,20 @@ const options = {
     info: {
       title: "skcal API",
       version: pkg.version && pkg.version !== "0.0.0" ? pkg.version : "1.0.0",
-      summary: "Typed HTTP API for skcal — calorie and body-composition tracking, built to wire into developer + AI tooling.",
+      summary: "Typed HTTP API for skcal: nutrition, body-composition, and training tracking, built to wire into developer and AI tooling.",
       description:
-        "HTTP API behind [skcal](https://app.skcal.fit), a calorie and body-composition tracker " +
-        "built for developers and AI power users — drive it from the CLI or straight from this typed API " +
-        "(MCP server planned).\n\n" +
+        "HTTP API behind [skcal](https://skcal.fit), the AI-native way to manage your health. The iPhone, " +
+        "Android, and web apps, the CLI, and the MCP server are all clients of this typed API.\n\n" +
         "Every record is scoped to the signed-in account's email, so one account can never read another's " +
-        "data. The scale-ingest route is the one exception — it is authenticated with a bearer token and " +
+        "data. The scale-ingest route is the one exception: it is authenticated with a bearer token and " +
         "attributes readings to a configured owner.\n\n" +
         "Nutrition is logged from a freeform text description, which is sent to Claude, " +
         "which returns per-item calories and protein.",
-      contact: { name: "Nick Khami", url: "https://app.skcal.fit", email: "nick@mintlify.com" },
+      contact: { name: "skcal support", url: "https://skcal.fit", email: "support@skcal.fit" },
       license: { name: "MIT", url: "https://opensource.org/license/mit" },
     },
     servers: [
       { url: "https://app.skcal.fit", description: "Production" },
-      { url: "http://localhost:5173", description: "Local development" },
     ],
     tags: [
       { name: "Service", description: "Liveness and identity probes." },

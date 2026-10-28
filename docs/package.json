@@ -1,0 +1,16 @@
+{
+  "name": "skcal-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "blume dev",
+    "build": "blume build",
+    "validate": "blume validate --strict",
+    "preview": "blume preview",
+    "stage": "rm -rf .cloudflare && mkdir .cloudflare && cp -r dist .cloudflare/docs && mv .cloudflare/docs/_headers .cloudflare/docs/_redirects .cloudflare/",
+    "deploy": "blume build && bun run stage && npx wrangler deploy --config wrangler.jsonc"
+  },
+  "dependencies": {
+    "blume": "2.2.6"
+  }
+}
