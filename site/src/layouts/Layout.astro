@@ -4,8 +4,8 @@ interface Props {
   description?: string;
 }
 const {
-  title = "skcal — manage your fitness over iMessage",
-  description = "Text a photo of your food, your weight, or your workout and skcal tracks everything. AI agent in iMessage, plus MCP server, CLI, and typed API.",
+  title = "skcal — the AI-native way to manage your health",
+  description = "Snap a photo of your food, log your weight and workouts, and ask your AI coach anything. iOS, Android, and web, plus MCP server, CLI, and typed API.",
 } = Astro.props;
 ---
 
@@ -171,30 +171,14 @@ const {
   .hero-note { margin-top: 14px; font-size: 13px; color: var(--muted); font-family: var(--mono); }
   .hero-note a { text-decoration: underline; text-underline-offset: 3px; }
   .hero-note a:hover { color: var(--ink); }
-  .textme { margin-top: 34px; display: flex; gap: 12px; flex-wrap: wrap; max-width: 460px; }
-  .textme[hidden] { display: none; }
-  .textme input {
-    flex: 1 1 180px; min-width: 0; font: inherit; font-size: 16.5px;
-    padding: 12px 16px; border-radius: 12px;
-    border: 1px solid var(--card-line); background: var(--card); color: var(--ink);
-    transition: border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out);
-  }
-  .textme input::placeholder { color: #75787d; }
-  .textme input:focus { outline: none; border-color: var(--amber); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.22); }
-  .textme .btn:disabled { opacity: 0.65; cursor: default; }
-  .textme-msg { margin-top: 16px; font-size: 15.5px; color: var(--ink-soft); max-width: 34em; }
-  .textme-msg.ok { color: var(--ink); font-weight: 600; }
-  .textme-static { margin-top: 34px; }
   .store-badges { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
   .store-badges a { display: block; border-radius: 8px; transition: transform 120ms var(--ease-out); }
   .store-badges a:active { transform: scale(0.97); }
   .store-badges img { display: block; height: 48px; width: auto; }
   .hero-badges { margin-top: 22px; }
   .cta-badges { justify-content: center; margin-top: 22px; }
-  .textme-number { font-family: var(--mono); font-size: clamp(17px, 4.6vw, 21px); padding: 16px 30px; }
 
-  /* ---- iMessage conversation mock ---- */
-  .imsg-phone { max-width: 390px; }
+  /* ---- product screenshots ---- */
   .scene-img {
     width: 100%; max-width: 460px; height: auto; justify-self: center;
     border-radius: 22px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
@@ -219,29 +203,6 @@ const {
   .legal p, .legal li { color: var(--ink-soft); font-size: 15.5px; line-height: 1.65; }
   .legal ul, .legal ol { padding-left: 20px; margin: 8px 0; }
   .legal a { color: var(--amber-deep); text-decoration: underline; text-underline-offset: 3px; }
-  .imsg {
-    background: var(--card); border-radius: 35px; overflow: hidden;
-    display: flex; flex-direction: column;
-  }
-  .imsg-head {
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
-    /* top padding clears the phone frame's notch pill */
-    padding: 62px 16px 12px; border-bottom: 1px solid var(--card-line);
-  }
-  .imsg-avatar {
-    display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%;
-    background: var(--amber); color: #1a1205;
-    font-family: var(--mono); font-weight: 700; font-size: 15px;
-  }
-  .imsg-name { font-size: 12.5px; color: var(--muted); }
-  .imsg-chat { display: flex; flex-direction: column; gap: 7px; padding: 18px 14px 24px; }
-  .imsg .b {
-    max-width: 82%; padding: 9px 14px; border-radius: 18px;
-    font-size: 14.5px; line-height: 1.4;
-  }
-  .imsg .b.out { align-self: flex-end; background: #0a84ff; color: #fff; border-bottom-right-radius: 5px; }
-  .imsg .b.in { align-self: flex-start; background: #e9e9eb; color: #111; border-bottom-left-radius: 5px; }
-  .imsg .b.att { font-family: var(--mono); font-size: 13px; }
   .works { margin-top: clamp(48px, 7vw, 72px); }
   .works h4 { font-size: 14px; font-weight: 650; color: var(--ink-soft); margin-bottom: 16px; }
   .dark .works { margin-top: clamp(36px, 5vw, 48px); }

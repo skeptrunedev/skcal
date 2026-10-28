@@ -9,21 +9,21 @@ const APP = "https://app.skcal.fit";
 
 <Layout
   title="Features — skcal"
-  description="An AI coach in iMessage that logs photos, weigh-ins, and workouts, remembers your preferences, and answers from your real numbers. Fully programmable underneath: MCP, CLI, typed API."
+  description="An AI coach that logs photos, weigh-ins, and workouts, remembers your preferences, and answers from your real numbers. Fully programmable underneath: MCP, CLI, typed API."
 >
   <Nav active="features" />
 
   <div class="wrap page-head">
-    <h1>Your coach lives in <span class="hl">Messages</span>.</h1>
-    <p>Text photos, weigh-ins, workouts, and questions, skcal logs everything and answers from your real numbers.</p>
+    <h1>A coach that <span class="hl">knows your numbers</span>.</h1>
+    <p>Send photos, weigh-ins, workouts, and questions, skcal logs everything and answers from your real numbers.</p>
   </div>
 
-  <section class="wrap imsg-feature">
-    <div class="imsg-grid">
-      <div class="imsg-points">
+  <section class="wrap coach-feature">
+    <div class="coach-grid">
+      <div class="coach-points">
         <div class="ipoint">
           <h3>Photo in, macros out</h3>
-          <p>Text a picture of any meal and get itemized calories and protein back in seconds. Scale readouts, treadmill consoles, and tape measures work the same way.</p>
+          <p>Snap a picture of any meal and get itemized calories and protein back in seconds. Scale readouts, treadmill consoles, and tape measures work the same way.</p>
         </div>
         <div class="ipoint">
           <h3>Everything logs itself</h3>
@@ -38,16 +38,16 @@ const APP = "https://app.skcal.fit";
           <p>"What should I eat tonight?" gets an answer computed from the calories and protein you have left, not generic tips.</p>
         </div>
         <div class="ipoint">
-          <h3>Onboarding is a text message</h3>
-          <p>Text the number, answer four quick questions, get your daily plan. No app install, no forms.</p>
+          <h3>Training that adapts</h3>
+          <p>Plan a mesocycle, log sets as you go, and rate how each muscle felt. Next week's volume adjusts to how you recovered.</p>
         </div>
       </div>
       <img
         class="scene-img shot-light"
-        src="/landing/imessage-real.jpg"
-        alt="A real iMessage thread with skcal, a burrito bowl photo logged at 760 calories and 46g protein, then dinner advice from the remaining budget"
-        width="945"
-        height="2048"
+        src="/landing/app-agent.png"
+        alt="The skcal Agent screen, ready for a question about what to eat"
+        width="780"
+        height="1600"
       />
     </div>
   </section>
@@ -172,16 +172,16 @@ const APP = "https://app.skcal.fit";
 </Layout>
 
 <style>
-  .imsg-feature {
+  .coach-feature {
     padding-bottom: clamp(40px, 6vw, 72px);
   }
-  .imsg-grid {
+  .coach-grid {
     display: grid;
     grid-template-columns: 1.1fr 0.9fr;
     gap: clamp(36px, 5vw, 64px);
     align-items: center;
   }
-  .imsg-points {
+  .coach-points {
     display: flex;
     flex-direction: column;
     gap: clamp(20px, 3vw, 30px);
@@ -201,10 +201,10 @@ const APP = "https://app.skcal.fit";
     padding-top: clamp(24px, 4vw, 40px);
   }
   @media (max-width: 860px) {
-    .imsg-grid {
+    .coach-grid {
       grid-template-columns: 1fr;
     }
-    .imsg-grid .scene-img {
+    .coach-grid .scene-img {
       justify-self: center;
     }
   }
