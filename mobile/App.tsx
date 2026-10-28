@@ -318,7 +318,10 @@ function Shell() {
             initialMessages={session.messages}
             initialConversationId={session.convId}
             onPersisted={onPersisted}
-            keyboardOffset={Platform.OS === "ios" ? insets.top + TOPBAR_H : 0}
+            // KeyboardAvoidingView compares its parent-relative frame with the
+            // keyboard's screen Y, so it needs the status bar + topbar above it.
+            // Edge-to-edge Android reports screen Y the same way iOS does.
+            keyboardOffset={insets.top + TOPBAR_H}
           />
         )}
       </View>
