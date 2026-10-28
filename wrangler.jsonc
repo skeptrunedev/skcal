@@ -42,8 +42,9 @@
     // Claude fast mode (2.5x output speed, 2x price). Our Anthropic org is not
     // enrolled yet (fast-mode limit 0 tokens/min), so it stays "0" until it is.
     "CLAUDE_FAST_MODE": "0",
-    // Comped accounts. Phone sign-ups are <digits>@phone.skcal.fit (Tessa).
-    "BILLING_EXEMPT_EMAILS": "me@skeptrune.com,nick.k@skeptrune.com,dev@local,19402492533@phone.skcal.fit",
+    // Comped accounts. Phone sign-ups are <digits>@phone.skcal.fit: Tessa,
+    // Joyce (Nick's mom), and Keira (Nick's sister, all three of her numbers).
+    "BILLING_EXEMPT_EMAILS": "me@skeptrune.com,nick.k@skeptrune.com,dev@local,19402492533@phone.skcal.fit,12484219220@phone.skcal.fit,12488709196@phone.skcal.fit,12488609196@phone.skcal.fit,12482316420@phone.skcal.fit",
     // Apple in-app purchase needs no vars: the bundle id and product id are
     // constants in src/worker/apple.ts, and the App Store Connect In-App
     // Purchase key lives in Worker secrets as APPLE_IAP_KEY_ID,
