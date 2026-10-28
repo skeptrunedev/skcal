@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, StyleSheet, BackHandler, Platform, Linking, Alert } from "react-native";
+import { View, Text, Pressable, StyleSheet, BackHandler, Platform, Linking, Alert, KeyboardAvoidingView } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeStyles, useTheme, ThemeProvider, type Palette } from "./src/theme";
@@ -300,7 +300,13 @@ function Shell() {
         )}
       </View>
 
-      <View style={[s.body, sideInsets]}>
+      {/* Every screen sits above the keyboard. Edge-to-edge Android never
+          resizes the window for it, so without this the keyboard covers the
+          agent's composer and any field low in Today's or Train's scroll view.
+          KeyboardAvoidingView compares its parent-relative frame with the
+          keyboard's screen Y; root fills the screen from y=0, so that frame
+          already includes the status bar and topbar and needs no offset. */}
+      <KeyboardAvoidingView style={[s.body, sideInsets]} behavior="padding">
         {blocked ? (
           <Paywall onActivated={() => setBlocked(false)} />
         ) : view === "today" ? (
@@ -318,13 +324,9 @@ function Shell() {
             initialMessages={session.messages}
             initialConversationId={session.convId}
             onPersisted={onPersisted}
-            // KeyboardAvoidingView compares its parent-relative frame with the
-            // keyboard's screen Y, so it needs the status bar + topbar above it.
-            // Edge-to-edge Android reports screen Y the same way iOS does.
-            keyboardOffset={insets.top + TOPBAR_H}
           />
         )}
-      </View>
+      </KeyboardAvoidingView>
 
       <Drawer
         open={drawerOpen}

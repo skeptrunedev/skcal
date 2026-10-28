@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   View, Text, TextInput, Pressable, FlatList, StyleSheet, Image, Animated, Easing,
-  AccessibilityInfo, KeyboardAvoidingView, Platform, Modal, type TextStyle,
+  AccessibilityInfo, Platform, Modal, type TextStyle,
 } from "react-native";
 import type { ImagePickerAsset } from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -241,12 +241,10 @@ export function Agent({
   initialMessages,
   initialConversationId,
   onPersisted,
-  keyboardOffset,
 }: {
   initialMessages: ChatMessage[];
   initialConversationId: string | null;
   onPersisted: (id: string) => void;
-  keyboardOffset: number;
 }) {
   const [messages, setMessages] = useState<ThreadMessage[]>(initialMessages);
   const [input, setInput] = useState("");
@@ -316,13 +314,8 @@ export function Agent({
   const stop = () => abortRef.current?.abort();
 
   return (
-    // padding on Android too — the window doesn't resize under edge-to-edge,
-    // so without it the keyboard covers the chat input (same bug as SignIn).
-    <KeyboardAvoidingView
-      style={s.wrap}
-      behavior="padding"
-      keyboardVerticalOffset={keyboardOffset}
-    >
+    // The app shell keeps this above the keyboard (see App.tsx).
+    <View style={s.wrap}>
       <FlatList
         ref={list}
         style={s.list}
@@ -435,7 +428,7 @@ export function Agent({
           </Pressable>
         </Pressable>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
