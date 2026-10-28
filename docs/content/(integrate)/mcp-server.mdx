@@ -64,6 +64,10 @@ these instructions with the correct URL for your deployment.
 
 ## Available tools
 
+21 tools, all scoped to your account.
+
+### Food and body
+
 | Tool | What it does |
 | --- | --- |
 | `skcal_get_status` | Calories + protein logged vs. targets for a day, plus latest weight |
@@ -75,6 +79,32 @@ these instructions with the correct URL for your deployment.
 | `skcal_log_workout` | Log a workout from a plain-text description |
 | `skcal_list_meals` | List meals logged on a day |
 | `skcal_move_food` | Move a meal or item to another day |
+
+### Goal phases
+
+| Tool | What it does |
+| --- | --- |
+| `skcal_get_phases` | Bulk, cut, and maintenance phases with planned vs. actual weekly rate, plus estimated maintenance calories |
+| `skcal_start_phase` | Start a phase; closes the open one and updates your targets |
+| `skcal_update_phase` | Edit a phase in place |
+| `skcal_end_phase` | End the open phase |
+
+See [Goal phases](/phases) for how rates and calories are set.
+
+### Training
+
+| Tool | What it does |
+| --- | --- |
+| `skcal_create_mesocycle` | Plan a mesocycle from a split template or your own days |
+| `skcal_get_training_session` | A session's exercises, targets, logged sets, and last week's numbers, or a whole-mesocycle overview |
+| `skcal_list_exercises` | The exercise library, built-in and custom |
+| `skcal_log_sets` | Log lifted sets for an exercise in the current session |
+| `skcal_set_muscle_feedback` | Record soreness, pump, joint pain, or workload for a muscle |
+| `skcal_complete_session` | Finish a session, log it as a workout, and plan next week's same day |
+| `skcal_swap_exercise` | Replace an exercise for the rest of the mesocycle |
+| `skcal_end_mesocycle` | End the active mesocycle early |
+
+See [Training](/training) for how each week is planned.
 
 ## How authorization works
 

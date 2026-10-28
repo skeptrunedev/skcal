@@ -1,0 +1,80 @@
+---
+title: "Goal phases"
+description: "Bulk, cut, or maintain at a planned weekly rate, with calories set from your own logs and a check on whether you're on pace."
+---
+
+A goal phase is a block of time with one direction for your bodyweight: a
+**bulk**, a **cut**, or **maintenance**. You pick how fast to gain or lose,
+skcal sets your calories for that rate, and Today tells you whether your weigh-ins
+are keeping pace.
+
+## Start a phase
+
+On **Today**, open the phase card and tap **Start a phase**, or tell the agent
+("starting a lean bulk", "time to cut till March"). Only one phase is open at a
+time. Starting a new one ends the current one the day before.
+
+Everything except the type is optional:
+
+| Field | If you leave it out |
+| --- | --- |
+| Rate (% bodyweight per week) | Bulk +0.25%, cut -0.5%, maintain 0% |
+| Start weight | Your latest weigh-in |
+| Planned end | Open-ended |
+| Goal weight | Projected from the start weight, rate, and planned end |
+| Daily calories | Estimated from your logs (see below) |
+| Daily protein | Your current target |
+
+Rates go from -2% to +2% a week. A bulk needs a positive rate and a cut a
+negative one. The agent picks +0.25 to +0.5% for a bulk and -0.5 to -1% for a
+cut unless you name one.
+
+Starting or editing a phase writes its calories, protein, goal weight, and dates
+into your [targets](/quickstart#3-set-your-targets), so the rest of skcal
+tracks against the new numbers.
+
+## Calories from your own data
+
+When you don't give a calorie number, skcal estimates your maintenance from the
+last 28 days. It takes your average logged intake and adjusts it by how much
+your weight actually moved over the same stretch. That accounts for your real
+metabolism and logging habits, not a formula. It then adds the surplus or
+deficit your rate implies.
+
+:::note
+The estimate needs at least 10 logged days and weigh-ins spanning 14 days. With
+less, your calories stay where they were. The agent will work out a number from
+your height, weight, and activity instead, or you can enter one.
+:::
+
+## Are you on track?
+
+The phase card compares your planned weekly change with your actual one. The
+actual rate is a trend line through every weigh-in since the phase started, so
+one heavy morning doesn't throw it off. After the first week it shows one of:
+
+- **On track**: within a third of the planned rate either way (within ±0.15% a
+  week for maintenance).
+- **Too fast**: gaining faster than planned in a bulk, or losing faster in a cut.
+- **Too slow**: anything short of the planned rate.
+
+Until there's a week of weigh-ins it shows **Tracking**. Ask the agent "am I
+gaining too fast?" and it answers from the same numbers.
+
+## From the API and MCP
+
+Phases live under `/api/phases`: list, start, edit, end, and delete. Keys need
+the `targets:read` or `targets:write` scope. `GET /api/phases` returns every
+phase with its progress, plus your current maintenance estimate.
+
+```bash
+curl -X POST https://app.skcal.fit/api/phases \
+  -H "Authorization: Bearer skcal_your_key_here" \
+  -H "content-type: application/json" \
+  -d '{"kind": "bulk", "ratePctPerWeek": 0.25, "plannedEndDate": "2027-03-01"}'
+```
+
+The [MCP server](/mcp-server) exposes the same operations as
+`skcal_get_phases`, `skcal_start_phase`, `skcal_update_phase`, and
+`skcal_end_phase`. See the **Phases** section of the
+[API reference](/api-reference/introduction) for every field.
