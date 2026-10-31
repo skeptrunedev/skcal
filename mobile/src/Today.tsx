@@ -123,10 +123,12 @@ function AppleHealthCard({
   connected,
   lastSync,
   onConnect,
+  workoutOnly,
 }: {
   connected: boolean;
   lastSync: { weights: number; workouts: number } | null;
   onConnect: () => Promise<void>;
+  workoutOnly: boolean;
 }) {
   const s = useS();
   const [connecting, setConnecting] = useState(false);
@@ -146,11 +148,15 @@ function AppleHealthCard({
             .filter(Boolean)
             .join(", ")}`
         : "";
-    body = <Text style={s.healthStatus}>Connected — weight & workouts sync when you open the app{synced}</Text>;
+    body = (
+      <Text style={s.healthStatus}>
+        Connected — {workoutOnly ? "workouts sync" : "weight & workouts sync"} when you open the app{synced}
+      </Text>
+    );
   } else {
     body = (
       <View style={s.healthRow}>
-        <Text style={s.healthText}>Log weigh-ins and workouts automatically</Text>
+        <Text style={s.healthText}>{workoutOnly ? "Log workouts automatically" : "Log weigh-ins and workouts automatically"}</Text>
         <Pressable
           style={s.healthConnect}
           disabled={connecting}
@@ -183,6 +189,7 @@ export function Today({
   onSubscriptionRequired,
   refreshKey,
   onDashboard,
+  workoutOnly,
 }: {
   onAuthError: (e: Error) => void;
   /**
@@ -195,6 +202,11 @@ export function Today({
   refreshKey: number;
   /** Each fresh dashboard, so the shell can pick the add sheet's first tab. */
   onDashboard: (d: Dashboard) => void;
+  /**
+   * Workout-only mode: the day's workouts, reminders, and Apple Health, with
+   * no calories, food, scale, weigh-ins, measurements, or goal phases.
+   */
+  workoutOnly: boolean;
 }) {
   const s = useS();
   const { c } = useTheme();
@@ -246,11 +258,13 @@ export function Today({
   }, [day]);
 
   const load = useCallback(async () => {
-    const side = Promise.all([loadReminders(), loadMeals(), loadWeights(), loadWorkouts()]);
+    const side = Promise.all(
+      workoutOnly ? [loadReminders(), loadWorkouts()] : [loadReminders(), loadMeals(), loadWeights(), loadWorkouts()],
+    );
     // Pull new Apple Health samples first (no-op when not connected / not iOS)
     // so a fresh weigh-in shows up in the dashboard fetch below.
     try {
-      const synced = await syncAppleHealth();
+      const synced = await syncAppleHealth({ weights: !workoutOnly });
       setHealthConnected(synced != null);
       if (synced) setHealthSync(synced);
     } catch {
@@ -271,7 +285,7 @@ export function Today({
       else setError(err.message);
     }
     await side;
-  }, [day, onAuthError, onSubscriptionRequired, onDashboard, loadReminders, loadMeals, loadWeights, loadWorkouts]);
+  }, [day, workoutOnly, onAuthError, onSubscriptionRequired, onDashboard, loadReminders, loadMeals, loadWeights, loadWorkouts]);
 
   // A meal edit or removal changes both the list and the day's totals.
   const reloadDashboard = useCallback(async () => {
@@ -476,7 +490,7 @@ export function Today({
   const remindersCard = reminders && <RemindersCard data={reminders} onChanged={loadReminders} />;
   // Apple Health is an iOS service; Android shows no card rather than naming another platform.
   const healthCard = Platform.OS !== "android" && (
-    <AppleHealthCard connected={healthConnected} lastSync={healthSync} onConnect={connectHealth} />
+    <AppleHealthCard connected={healthConnected} lastSync={healthSync} onConnect={connectHealth} workoutOnly={workoutOnly} />
   );
 
   // Whole-day navigation: everything above reflects this day.
@@ -499,11 +513,42 @@ export function Today({
     </View>
   );
 
+  const refreshControl = (
+    <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.amber} colors={[c.amber]} progressBackgroundColor={c.card} />
+  );
+
+  if (workoutOnly) {
+    return (
+      <ScrollView
+        style={s.scroll}
+        contentContainerStyle={[s.content, { paddingBottom: 40 + insets.bottom }]}
+        refreshControl={refreshControl}
+      >
+        {twoColumn ? (
+          <View style={s.columns}>
+            <View style={s.column}>{workoutsCard}</View>
+            <View style={s.column}>
+              {remindersCard}
+              {healthCard}
+            </View>
+          </View>
+        ) : (
+          <>
+            {workoutsCard}
+            {remindersCard}
+            {healthCard}
+          </>
+        )}
+        {dayStrip}
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView
       style={s.scroll}
       contentContainerStyle={[s.content, { paddingBottom: 40 + insets.bottom }]}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.amber} colors={[c.amber]} progressBackgroundColor={c.card} />}
+      refreshControl={refreshControl}
     >
       {glance}
       {twoColumn ? (

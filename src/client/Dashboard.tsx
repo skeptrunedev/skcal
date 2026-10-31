@@ -39,14 +39,43 @@ export function Dashboard({
   onDateChange,
   refreshKey,
   onChange,
+  workoutOnly,
 }: {
   data: DashboardData;
   date: string;
   onDateChange: (d: string) => void;
   refreshKey: number;
   onChange: () => void;
+  // Workout-only mode: the day's workouts and reminders, nothing about
+  // calories, food, body weight, measurements, or goal phases.
+  workoutOnly: boolean;
 }) {
   const isToday = date === todayLocal();
+  // Whole-day navigation: everything above it reflects this day.
+  const dayStrip = (
+    <div className="day-strip">
+      <button className="daynav-btn" onClick={() => onDateChange(shiftDay(date, -1))} aria-label="Previous day">
+        <ChevronLeft />
+      </button>
+      <span className="day-strip-label">{dayLabel(date)}</span>
+      <button className="daynav-btn" onClick={() => onDateChange(shiftDay(date, 1))} disabled={isToday} aria-label="Next day">
+        <ChevronRight />
+      </button>
+    </div>
+  );
+
+  if (workoutOnly) {
+    return (
+      <>
+        <div className="grid">
+          <WorkoutLog date={date} refreshKey={refreshKey} />
+          <Reminders />
+        </div>
+        {dayStrip}
+      </>
+    );
+  }
+
   const { weight, targets, measurementsLatest, shoulderToWaist, nutritionToday } = data;
   const latestLb = weight.latestKg != null ? kgToLb(weight.latestKg) : null;
   const avgLb = weight.weeklyAvgKg != null ? kgToLb(weight.weeklyAvgKg) : null;
@@ -217,16 +246,7 @@ export function Dashboard({
         <Reminders />
       </div>
 
-      {/* whole-day navigation: everything above reflects this day */}
-      <div className="day-strip">
-        <button className="daynav-btn" onClick={() => onDateChange(shiftDay(date, -1))} aria-label="Previous day">
-          <ChevronLeft />
-        </button>
-        <span className="day-strip-label">{dayLabel(date)}</span>
-        <button className="daynav-btn" onClick={() => onDateChange(shiftDay(date, 1))} disabled={isToday} aria-label="Next day">
-          <ChevronRight />
-        </button>
-      </div>
+      {dayStrip}
     </>
   );
 }

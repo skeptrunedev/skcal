@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeStyles, useTheme, type ThemePref } from "./theme";
-import { Conversation, photoSource } from "./api";
+import { Conversation, photoSource, type AppMode } from "./api";
 import {
   SunIcon, MessageSquareIcon, SquarePenIcon, SearchIcon, TrashIcon, DumbbellIcon, PlusIcon, PlugIcon, ChevronDownIcon,
   PanelLeftIcon, BrandMark,
@@ -19,6 +19,11 @@ const THEME_OPTIONS: { pref: ThemePref; label: string }[] = [
   { pref: "dark", label: "Dark" },
 ];
 
+const MODE_OPTIONS: { mode: AppMode; label: string }[] = [
+  { mode: "full", label: "Full app" },
+  { mode: "workout", label: "Workouts only" },
+];
+
 /** The profile menu's account actions; a null action hides its item. */
 export type AccountActions = {
   email: string | null;
@@ -29,6 +34,9 @@ export type AccountActions = {
   onApiKeys: () => void;
   onLinkedNumbers: () => void;
   onBilling: (() => void) | null;
+  /** Account-wide app mode; "workout" is the workout-only app. */
+  mode: AppMode;
+  onModeChange: (mode: AppMode) => void;
   onSignOut: () => void;
   onDeleteAccount: () => void;
 };
@@ -76,7 +84,8 @@ export function Drawer({
   onClose: () => void;
   view: DrawerView;
   onNavigate: (v: DrawerView) => void;
-  onAdd: () => void;
+  /** null hides "Log entry" (workout-only mode has nothing for it to log). */
+  onAdd: (() => void) | null;
   onInstallMcp: () => void;
   account: AccountActions;
   conversations: Conversation[];
@@ -171,7 +180,7 @@ export function Drawer({
           active={view === "coach"}
           onPress={() => onNavigate("coach")}
         />
-        <NavItem icon={<PlusIcon size={19} color={c.muted} />} label="Log entry" onPress={onAdd} />
+        {onAdd && <NavItem icon={<PlusIcon size={19} color={c.muted} />} label="Log entry" onPress={onAdd} />}
         <NavItem icon={<PlugIcon size={19} color={c.muted} />} label="Install MCP" onPress={onInstallMcp} />
 
         <View style={s.divider} />
@@ -224,6 +233,24 @@ export function Drawer({
               {account.onBilling && (
                 <MenuItem label="Billing" onPress={() => { setProfileMenu(false); account.onBilling?.(); }} />
               )}
+              <Text style={s.menuSection}>APP MODE</Text>
+              <View style={s.segment} accessibilityRole="radiogroup" accessibilityLabel="App mode">
+                {MODE_OPTIONS.map((o) => (
+                  <Pressable
+                    key={o.mode}
+                    style={[s.segmentItem, account.mode === o.mode && s.segmentItemOn]}
+                    onPress={() => account.onModeChange(o.mode)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: account.mode === o.mode }}
+                    accessibilityLabel={o.label}
+                  >
+                    <Text style={[s.segmentText, account.mode === o.mode && s.segmentTextOn]}>{o.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={s.menuHint}>
+                {account.mode === "workout" ? "Just training. No calories, food, or weigh-ins." : "Training, nutrition, and body weight."}
+              </Text>
               <Text style={s.menuSection}>APPEARANCE</Text>
               <View style={s.segment} accessibilityRole="radiogroup" accessibilityLabel="Appearance">
                 {THEME_OPTIONS.map((o) => (
@@ -341,6 +368,7 @@ const useS = makeStyles((c) =>
   segmentItemOn: { backgroundColor: c.amber },
   segmentText: { color: c.fg, fontSize: 13 },
   segmentTextOn: { color: c.amberInk, fontWeight: "700" },
+  menuHint: { color: c.dim, fontSize: 12, lineHeight: 16, paddingHorizontal: 9, paddingTop: 6 },
   menuDivider: { height: 1, backgroundColor: c.line, marginVertical: 6, marginHorizontal: 3 },
   }),
 );

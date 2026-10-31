@@ -4,6 +4,7 @@ import type {
   MesoSummary,
   MuscleFeedback,
   NutritionDay,
+  Settings,
   Phase,
   Targets,
   TrainingLibrary,
@@ -208,6 +209,8 @@ export const api = {
     return r.json() as Promise<Channel>;
   },
   deleteChannel: (id: string) => jsend(`/api/channels/${id}`, "DELETE", undefined),
+  settings: () => jget<Settings>(`/api/settings`),
+  updateSettings: (patch: Partial<Settings>) => jcall<Settings>(`/api/settings`, "PUT", patch),
   billing: () => jget<Billing>(`/api/billing`),
   billingCheckout: async (): Promise<{ url: string }> => {
     const r = await rawFetch(`/api/billing/checkout`, { method: "POST" });

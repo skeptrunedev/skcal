@@ -10,6 +10,8 @@ import {
   profileImage,
   setAvatar,
   billing as fetchBilling,
+  getSettings,
+  updateSettings,
   listConversations,
   deleteConversation,
   deleteAccount,
@@ -18,6 +20,7 @@ import {
   Conversation,
   Dashboard,
   Billing,
+  AppMode,
 } from "./src/api";
 import { SignIn } from "./src/SignIn";
 import { Today } from "./src/Today";
@@ -84,6 +87,10 @@ function Shell() {
   const [avatar, setAvatarImage] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [billing, setBilling] = useState<Billing | null>(null);
+  // Account-wide app mode, shared with the web app. "workout" strips calories,
+  // food, the scale, and weigh-ins out of every screen.
+  const [mode, setMode] = useState<AppMode>("full");
+  const workoutOnly = mode === "workout";
   // Today's latest dashboard (picks the add sheet's first tab) and a counter
   // that tells Today to refetch after the add sheet logs something.
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -138,6 +145,7 @@ function Shell() {
     whoami().then((w) => setEmail(w.email)).catch(() => {});
     profileImage().then(setAvatarImage).catch(() => {});
     fetchBilling().then(setBilling).catch(() => {});
+    getSettings().then((st) => setMode(st.mode)).catch(() => {});
     loadConversations();
   }, [authed, loadConversations]);
 
@@ -177,6 +185,7 @@ function Shell() {
     setEmail(null);
     setAvatarImage(null);
     setBilling(null);
+    setMode("full");
     setDashboard(null);
     setConversations([]);
     setSession({ key: "new-0", convId: null, messages: [] });
@@ -206,6 +215,19 @@ function Shell() {
       },
     ]);
   }, [signOut]);
+
+  // Optimistic: flip the UI now, adopt what the server stored, and fall back
+  // to the previous mode if the save fails.
+  const changeMode = (next: AppMode) => {
+    const prev = mode;
+    setMode(next);
+    updateSettings({ mode: next })
+      .then((st) => setMode(st.mode))
+      .catch((e) => {
+        setMode(prev);
+        Alert.alert("Couldn’t change the app mode", e instanceof Error ? e.message : String(e));
+      });
+  };
 
   const navigate = (v: DrawerView) => {
     setDrawerOpen(false);
@@ -293,7 +315,7 @@ function Shell() {
           <PanelLeftIcon size={20} color={c.muted} />
         </Pressable>
         <Text style={s.topbarTitle}>{TITLES[view]}</Text>
-        {view === "today" && (
+        {view === "today" && !workoutOnly && (
           <Pressable style={s.iconBtn} onPress={() => setAdding(true)} accessibilityLabel="Log entry">
             <PlusIcon size={20} color={c.muted} />
           </Pressable>
@@ -315,6 +337,7 @@ function Shell() {
             onSubscriptionRequired={HAS_PAYWALL ? () => setBlocked(true) : undefined}
             refreshKey={refreshKey}
             onDashboard={setDashboard}
+            workoutOnly={workoutOnly}
           />
         ) : view === "train" ? (
           <Train onAuthError={onAuthError} onSubscriptionRequired={HAS_PAYWALL ? () => setBlocked(true) : undefined} />
@@ -324,6 +347,7 @@ function Shell() {
             initialMessages={session.messages}
             initialConversationId={session.convId}
             onPersisted={onPersisted}
+            workoutOnly={workoutOnly}
           />
         )}
       </KeyboardAvoidingView>
@@ -333,7 +357,7 @@ function Shell() {
         onClose={() => setDrawerOpen(false)}
         view={view}
         onNavigate={navigate}
-        onAdd={fromDrawer(setAdding)}
+        onAdd={workoutOnly ? null : fromDrawer(setAdding)}
         onInstallMcp={fromDrawer(setMcpOpen)}
         account={{
           email,
@@ -352,6 +376,8 @@ function Shell() {
                   Linking.openURL(APPLE_SUBSCRIPTIONS_URL);
                 }
               : null,
+          mode,
+          onModeChange: changeMode,
           onSignOut: signOut,
           onDeleteAccount: confirmDeleteAccount,
         }}
@@ -364,7 +390,7 @@ function Shell() {
         onDeleteConversation={removeConversation}
       />
 
-      {adding && (
+      {adding && !workoutOnly && (
         <AddSheet
           open
           onClose={() => setAdding(false)}

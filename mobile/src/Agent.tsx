@@ -241,10 +241,12 @@ export function Agent({
   initialMessages,
   initialConversationId,
   onPersisted,
+  workoutOnly,
 }: {
   initialMessages: ChatMessage[];
   initialConversationId: string | null;
   onPersisted: (id: string) => void;
+  workoutOnly: boolean;
 }) {
   const [messages, setMessages] = useState<ThreadMessage[]>(initialMessages);
   const [input, setInput] = useState("");
@@ -326,7 +328,7 @@ export function Agent({
         // Home state: greeting centered in the viewport, composer docked below.
         ListEmptyComponent={
           <View style={s.welcome}>
-            <Text style={s.welcomeTitle}>Ask before you eat.</Text>
+            <Text style={s.welcomeTitle}>{workoutOnly ? "Ask before you lift." : "Ask before you eat."}</Text>
           </View>
         }
         onContentSizeChange={() => list.current?.scrollToEnd({ animated: false })}
@@ -356,7 +358,7 @@ export function Agent({
           )}
           <TextInput
             style={[s.input, Platform.OS === "web" && WEB_NO_RING]}
-            placeholder="What are you thinking of eating?"
+            placeholder={workoutOnly ? "What are you training today?" : "What are you thinking of eating?"}
             placeholderTextColor={c.muted}
             value={input}
             onChangeText={setInput}

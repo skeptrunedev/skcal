@@ -144,6 +144,35 @@ describe("targets", () => {
   });
 });
 
+describe("settings", () => {
+  it("GET defaults to the full app", async () => {
+    const res = await asUser("settings-default@example.com", "/api/settings");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ mode: "full" });
+  });
+
+  it("PUT switches to workout-only, persists, and switches back", async () => {
+    const who = "settings-mode@example.com";
+    const put = await jsonPost(who, "/api/settings", { mode: "workout" }, "PUT");
+    expect(put.status).toBe(200);
+    expect(await put.json()).toEqual({ mode: "workout" });
+    expect(await (await asUser(who, "/api/settings")).json()).toEqual({ mode: "workout" });
+    // Another account is unaffected.
+    expect(await (await asUser("settings-other@example.com", "/api/settings")).json()).toEqual({ mode: "full" });
+
+    await jsonPost(who, "/api/settings", { mode: "full" }, "PUT");
+    expect(await (await asUser(who, "/api/settings")).json()).toEqual({ mode: "full" });
+  });
+
+  it("PUT with an unknown mode → 400 and leaves the mode alone", async () => {
+    const who = "settings-bad@example.com";
+    await jsonPost(who, "/api/settings", { mode: "workout" }, "PUT");
+    const res = await jsonPost(who, "/api/settings", { mode: "calories" }, "PUT");
+    expect(res.status).toBe(400);
+    expect(await (await asUser(who, "/api/settings")).json()).toEqual({ mode: "workout" });
+  });
+});
+
 describe("dashboard", () => {
   it("returns the documented shape and computes shoulderToWaist", async () => {
     const user = "dash-user@example.com";

@@ -2,8 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Sun, Dumbbell, MessageSquare, Plus, SquarePen, Search, PanelLeft, PanelLeftOpen, Trash2, ChevronDown, Plug } from "lucide-react";
 import type { View } from "./BottomNav";
 import type { CoachHistory } from "./Coach";
+import type { AppMode } from "../shared/types";
 import { api } from "./api";
 import { compressImage } from "./image";
+
+const MODE_OPTIONS: { mode: AppMode; label: string }[] = [
+  { mode: "full", label: "Full app" },
+  { mode: "workout", label: "Workouts only" },
+];
 
 const NAV_ICONS: Record<View | "add", React.ReactNode> = {
   today: <Sun />,
@@ -40,6 +46,8 @@ export function NavDrawer({
   view,
   onNavigate,
   onAdd,
+  mode,
+  onModeChange,
   open,
   onClose,
   onExpand,
@@ -55,7 +63,10 @@ export function NavDrawer({
 }: {
   view: View;
   onNavigate: (v: View) => void;
-  onAdd: () => void;
+  // null hides "Log entry" (workout-only mode has nothing for it to log).
+  onAdd: (() => void) | null;
+  mode: AppMode;
+  onModeChange: (mode: AppMode) => void;
   open: boolean;
   onClose: () => void;
   onExpand: () => void;
@@ -134,7 +145,7 @@ export function NavDrawer({
           <NavItem icon={NAV_ICONS.today} label="Today" active={view === "today"} onClick={() => onNavigate("today")} />
           <NavItem icon={NAV_ICONS.train} label="Train" active={view === "train"} onClick={() => onNavigate("train")} />
           <NavItem icon={NAV_ICONS.coach} label="Agent" active={view === "coach"} onClick={() => onNavigate("coach")} />
-          <NavItem icon={NAV_ICONS.add} label="Log entry" onClick={onAdd} />
+          {onAdd && <NavItem icon={NAV_ICONS.add} label="Log entry" onClick={onAdd} />}
           <NavItem icon={<Plug />} label="Install MCP" onClick={onInstallMcp} />
         </nav>
 
@@ -208,6 +219,24 @@ export function NavDrawer({
               >
                 Linked numbers
               </button>
+              <p className="profile-menu-section" id="app-mode-label">App mode</p>
+              <div className="segment" role="radiogroup" aria-labelledby="app-mode-label">
+                {MODE_OPTIONS.map((o) => (
+                  <button
+                    key={o.mode}
+                    className={`segment-item ${mode === o.mode ? "on" : ""}`}
+                    role="radio"
+                    aria-checked={mode === o.mode}
+                    onClick={() => onModeChange(o.mode)}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              <p className="profile-menu-hint">
+                {mode === "workout" ? "Just training. No calories, food, or weigh-ins." : "Training, nutrition, and body weight."}
+              </p>
+              <div className="profile-menu-divider" />
               {onBilling && (
                 <button
                   className="profile-menu-item"

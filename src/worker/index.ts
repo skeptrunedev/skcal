@@ -1404,6 +1404,72 @@ app.put("/api/targets", async (c) => {
   return c.json({ ok: true });
 });
 
+// ---- settings: account-wide app preferences ----------------------------------
+async function getAppMode(c: EnvCtx, email: string): Promise<schema.AppMode> {
+  const row = (
+    await db(c).select({ mode: schema.userSettings.mode }).from(schema.userSettings).where(eq(schema.userSettings.userEmail, email)).limit(1)
+  )[0];
+  return row?.mode ?? "full";
+}
+
+/**
+ * @openapi
+ * /api/settings:
+ *   get:
+ *     tags: [Account]
+ *     summary: Get app settings
+ *     description: Returns the caller's app preferences, which every client on the account follows.
+ *     operationId: getSettings
+ *     responses:
+ *       '200':
+ *         description: The caller's settings.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Settings'
+ */
+app.get("/api/settings", async (c) => c.json({ mode: await getAppMode(c, c.get("email")) }));
+
+/**
+ * @openapi
+ * /api/settings:
+ *   put:
+ *     tags: [Account]
+ *     summary: Update app settings
+ *     description: Changes the caller's app preferences on every platform at once; omitted fields are left unchanged.
+ *     operationId: updateSettings
+ *     requestBody:
+ *       required: true
+ *       description: The settings to change.
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/SettingsInput'
+ *     responses:
+ *       '200':
+ *         description: The settings after the change.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Settings'
+ *       '400':
+ *         $ref: '#/components/responses/BadRequest'
+ */
+app.put("/api/settings", async (c) => {
+  const email = c.get("email");
+  const b = await c.req.json<{ mode?: unknown }>().catch(() => ({}) as { mode?: unknown });
+  if (b.mode === undefined) return c.json({ mode: await getAppMode(c, email) });
+  if (!schema.APP_MODES.includes(b.mode as schema.AppMode)) {
+    return c.json({ error: `mode must be one of ${schema.APP_MODES.join(", ")}` }, 400);
+  }
+  const mode = b.mode as schema.AppMode;
+  await db(c)
+    .insert(schema.userSettings)
+    .values({ userEmail: email, mode, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: schema.userSettings.userEmail, set: { mode, updatedAt: new Date() } });
+  return c.json({ mode });
+});
+
 // ---- dashboard aggregate ---------------------------------------------------
 /**
  * @openapi
@@ -2347,24 +2413,11 @@ const kgToLb = (kg: number) => kg * LB_PER_KG;
 
 // Builds the grounded system prompt from the caller's real numbers (same
 // sources as the dashboard). Shared by the JSON and streaming coach routes.
-async function buildCoachSystem(
-  c: Context<{ Bindings: Bindings; Variables: Variables }>,
-  email: string,
-  today: string,
-  tzMin = 0,
-): Promise<string> {
-  const targets = await getTargets(c, email);
-  const nutToday = await db(c)
-    .select()
-    .from(schema.nutritionDays)
-    .where(and(eq(schema.nutritionDays.userEmail, email), eq(schema.nutritionDays.date, today)))
-    .limit(1);
-  const kcalIn = nutToday[0]?.kcal ?? 0;
-  const proteinIn = nutToday[0]?.proteinG ?? 0;
-
-  const dayStart = new Date(Date.parse(`${today}T00:00:00Z`));
-  const workoutRows = await db(c)
-    .select()
+// One line naming the day's logged workouts, for both coach prompts.
+async function workoutsOnDayLine(c: EnvCtx, email: string, day: string): Promise<string> {
+  const dayStart = new Date(Date.parse(`${day}T00:00:00Z`));
+  const rows = await db(c)
+    .select({ summary: schema.workouts.summary })
     .from(schema.workouts)
     .where(
       and(
@@ -2374,7 +2427,77 @@ async function buildCoachSystem(
       ),
     )
     .orderBy(desc(schema.workouts.startedAt));
-  const workoutLine = workoutRows.length ? workoutRows.map((w) => w.summary).join("; ") : "none logged yet";
+  return rows.length ? rows.map((w) => w.summary).join("; ") : "none logged yet";
+}
+
+// "Tue 2026-10-27 18:04 (UTC-05:00)" in the user's local time.
+function localNowLine(tzMin: number): string {
+  const localNow = new Date(Date.now() - tzMin * 60_000);
+  const off = Math.abs(tzMin);
+  const utcOffset = `${tzMin > 0 ? "-" : "+"}${String(Math.floor(off / 60)).padStart(2, "0")}:${String(off % 60).padStart(2, "0")}`;
+  return `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][localNow.getUTCDay()]} ${localNow.toISOString().slice(0, 16).replace("T", " ")} (UTC${utcOffset})`;
+}
+
+async function memoryLinesFor(c: Context<{ Bindings: Bindings; Variables: Variables }>, email: string): Promise<string> {
+  const memories = await listMemories(c, email);
+  return memories.length ? memories.map((m) => `- [${m.id.slice(0, 8)}] ${m.content}`).join("\n") : "- none saved yet";
+}
+
+const COACH_STYLE =
+  "STYLE, non-negotiable, never use em dashes or colons in your replies, use commas instead. Never open with acknowledgement filler such as 'Got it', 'Understood', 'Sure', 'Noted', 'Done', or 'Great', skip straight to the substantive thing.";
+
+// Workout-only mode: the agent coaches training and nothing else. It never
+// sees calorie, food, or weight data, so it can't bring them up.
+async function buildWorkoutCoachSystem(
+  c: Context<{ Bindings: Bindings; Variables: Variables }>,
+  email: string,
+  today: string,
+  tzMin: number,
+): Promise<string> {
+  const [workoutLine, training, memoryLines] = await Promise.all([
+    workoutsOnDayLine(c, email, today),
+    trainingLines(c, email),
+    memoryLinesFor(c, email),
+  ]);
+  return [
+    "You are the user's blunt, knowledgeable hypertrophy and strength-training coach inside their workout tracker.",
+    "The user runs skcal in workout-only mode, so this is a workout app for them. Coach training, programming, exercise selection, recovery, and logging workouts. Do not track or bring up calories, food, macros, body weight, weigh-ins, or goal phases; if they ask about nutrition or weight tracking, say that tracking is turned off in workout-only mode and can be turned back on in Settings, then answer briefly without logging anything.",
+    "Answer using THEIR real training data below, never invent numbers.",
+    COACH_STYLE,
+    "",
+    `CURRENT TIME (user's local): ${localNowLine(tzMin)}`,
+    "",
+    "TODAY SO FAR:",
+    `- Workouts: ${workoutLine}`,
+    "",
+    "TRAINING (RP-style mesocycles):",
+    ...training,
+    "",
+    "MEMORIES (durable preferences/facts the user told you, always honor these):",
+    memoryLines,
+    "",
+    "Be concise: 2–5 sentences, conversational. Light markdown is fine (a **bold** verdict, an occasional short list) but keep it tight, no headers, no long bullet dumps.",
+  ].join("\n");
+}
+
+async function buildCoachSystem(
+  c: Context<{ Bindings: Bindings; Variables: Variables }>,
+  email: string,
+  today: string,
+  tzMin = 0,
+  mode: schema.AppMode = "full",
+): Promise<string> {
+  if (mode === "workout") return buildWorkoutCoachSystem(c, email, today, tzMin);
+  const targets = await getTargets(c, email);
+  const nutToday = await db(c)
+    .select()
+    .from(schema.nutritionDays)
+    .where(and(eq(schema.nutritionDays.userEmail, email), eq(schema.nutritionDays.date, today)))
+    .limit(1);
+  const kcalIn = nutToday[0]?.kcal ?? 0;
+  const proteinIn = nutToday[0]?.proteinG ?? 0;
+
+  const workoutLine = await workoutsOnDayLine(c, email, today);
 
   const weightRows = await db(c)
     .select()
@@ -2413,10 +2536,7 @@ async function buildCoachSystem(
       (stw ? ` (shoulder:waist ${stw})` : "")
     : "none logged yet";
 
-  const memories = await listMemories(c, email);
-  const memoryLines = memories.length
-    ? memories.map((m) => `- [${m.id.slice(0, 8)}] ${m.content}`).join("\n")
-    : "- none saved yet";
+  const memoryLines = await memoryLinesFor(c, email);
 
   const kcalTarget = targets.dailyKcalTarget ?? 0;
   const proteinTarget = targets.proteinTargetG ?? 0;
@@ -2433,14 +2553,11 @@ async function buildCoachSystem(
   const phases = await listPhasesForUser(c, email, today);
   const training = await trainingLines(c, email);
 
-  const localNow = new Date(Date.now() - tzMin * 60_000);
-  const off = Math.abs(tzMin);
-  const utcOffset = `${tzMin > 0 ? "-" : "+"}${String(Math.floor(off / 60)).padStart(2, "0")}:${String(off % 60).padStart(2, "0")}`;
-  const nowLine = `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][localNow.getUTCDay()]} ${localNow.toISOString().slice(0, 16).replace("T", " ")} (UTC${utcOffset})`;
+  const nowLine = localNowLine(tzMin);
   return [
     "You are the user's blunt, knowledgeable nutrition and hypertrophy-training coach inside their body-composition tracker.",
     "Answer using THEIR real numbers below — never invent targets or intake.",
-    "STYLE, non-negotiable, never use em dashes or colons in your replies, use commas instead. Never open with acknowledgement filler such as 'Got it', 'Understood', 'Sure', 'Noted', 'Done', or 'Great', skip straight to the substantive thing.",
+    COACH_STYLE,
     "",
     `CURRENT TIME (user's local): ${nowLine}`,
     "",
@@ -2476,6 +2593,32 @@ async function buildCoachSystem(
     "Be concise: 2–5 sentences, conversational. Light markdown is fine (a **bold** verdict, an occasional short list) but keep it tight — no headers, no long bullet dumps.",
   ].join("\n");
 }
+
+// Coach rules shared by full and workout-only mode.
+const COACH_TRAINING_RULES = `TRAINING, mesocycles follow Renaissance Periodization: weekly hard sets per muscle start near MEV and climb toward MRV as feedback allows, reps in reserve fall from 3 to 0 across the accumulation weeks, and the last week is a deload. To plan one, ask only what you need (days per week, muscles to prioritize, weeks with the default 5 including deload, equipment limits), then call create_mesocycle with a template or explicit days; list_exercises shows the library. When an active mesocycle exists and the user reports lifting ("bench 185 for 8, 8 and 7", "did 3 sets of curls with 30s"), log it with log_sets against the session instead of log_workout, then say what's left in the session. Every set records when it was finished, which is how rest periods and workout length are measured, so log sets as the user reports them and pass at only for sets they say were done earlier; sets sent together without times count as logged together with unknown rest. Answer rest, pace, and "how much have I done" questions from the session's progress and each set's restS (seconds since the previous set finished, which includes the set itself) via get_training_session, or from meso_sets.logged_at with query_user_data for history. Soreness, pump, joint pain, or how hard a muscle's work felt goes to set_muscle_feedback (map their words to the nearest answer). When they say the workout is done, call complete_session, which logs it as a workout and plans next week's same day. Use get_training_session for "what's my workout today" or targets, swap_exercise when they want a different movement, and end_mesocycle to stop one early.`;
+const COACH_REMINDER_RULES = `REMINDERS, when the user asks to be reminded of something ("remind me to log lunch at noon", "ping me to weigh in on weekday mornings"), create it with set_reminder, and when they correct or adjust one ("no, 9am", "weekdays only") edit it in place with update_reminder using the id from your create result or list_reminders, never create a second one for the same thing. Cancellations use delete_reminder. Reminders DELIVER OVER IMESSAGE, if the tool result says phoneLinked is false, tell the user they won't receive reminder texts until they link their phone in their profile or text the skcal number. If the result says tzDefaulted is true, state the timezone you assumed and ask them to correct it if wrong. After creating one, confirm in plain words what was set, the time and the cadence.`;
+
+// Workout-only mode hides every nutrition, weight, measurement, and phase tool.
+const WORKOUT_MODE_TOOLS = new Set([
+  "query_user_data",
+  "log_workout",
+  "remember",
+  "forget_memory",
+  "set_reminder",
+  "update_reminder",
+  "list_reminders",
+  "delete_reminder",
+  "list_exercises",
+  "create_mesocycle",
+  "get_training_session",
+  "log_sets",
+  "set_muscle_feedback",
+  "complete_session",
+  "swap_exercise",
+  "end_mesocycle",
+]);
+const coachToolsFor = (mode: schema.AppMode) =>
+  mode === "workout" ? COACH_TOOLS.filter((t) => WORKOUT_MODE_TOOLS.has(t.name)) : COACH_TOOLS;
 
 // Validates and normalizes the posted chat history for either coach route.
 // Content is a plain string, or an array of text/image parts (images as data
@@ -3555,7 +3698,7 @@ app.post("/api/agent", async (c) => {
 
   const tzMin = Number(b.tz ?? 0) || 0;
   const today = c.req.query("date") ?? new Date(Date.now() - tzMin * 60_000).toISOString().slice(0, 10);
-  const system = await buildCoachSystem(c, email, today, tzMin);
+  const system = await buildCoachSystem(c, email, today, tzMin, await getAppMode(c, email));
 
   let reply: string;
   try {
@@ -3598,9 +3741,12 @@ app.post("/api/agent/stream", async (c) => {
 
   const tzMin = Number(b.tz ?? 0) || 0;
   const today = c.req.query("date") ?? new Date(Date.now() - tzMin * 60_000).toISOString().slice(0, 10);
+  const mode = await getAppMode(c, email);
   const system =
-    (await buildCoachSystem(c, email, today, tzMin)) +
-    `\n\nLOGGING JUDGMENT, log immediately when the user states something that happened (a meal eaten, a weigh-in, a workout done), calling the log tool straight away without first checking the log; after logging, reply in one or two short sentences, what you logged with its kcal and protein, then today's total and what's left, and add advice only if the user asked for it; when the conversation is exploratory ("should I eat", "what if", "how many calories are in"), answer first and ask before logging. When the user sends a PHOTO, look at it, food -> describe what you see and log it with log_meal, scale readout -> log_weight, workout screenshot -> log_workout, tape measure -> log_measurement. Tools: you can log meals with log_meal; view and reorganize the food log with list_food_log, move_meal, and move_food_item; clean up mistakes and duplicates with delete_meal and delete_food_item, and when the user corrects an entry ("that was actually 600 kcal", "it was two scoops") fix it in place with edit_food_item instead of deleting and relogging; record body measurements with log_measurement (inches); record weigh-ins with log_weight (pounds); answer questions about weight history (first weigh-in, lb lost per week, what they weighed on a date) with get_weight_history instead of guessing from the summary above; for any other question about their past data that no tool covers (averages, streaks, trends across meals, workouts or measurements), write a read-only query with query_user_data rather than guessing; log workouts from the user's plain description with log_workout (pass their words through); save durable user preferences/facts with remember and remove wrong ones with forget_memory; update daily calorie and protein targets with set_targets. When the user describes their day to day activity, a new job, a change in training volume, or a big lifestyle change, recompute their daily calorie target with Mifflin-St Jeor from the height, sex, and latest weigh-in in the context above, scaled by the closest activity multiplier, 1.2 sedentary, 1.375 lightly active, 1.55 moderately active, 1.725 very active, 1.9 athlete, then apply the deficit or surplus their current goal implies, state the new daily calorie and protein numbers plainly, and call set_targets with them, passing their activity in a few words. GOAL PHASES, when the user starts a bulk, cut, or maintenance block ("starting a lean bulk", "time to cut till March"), call start_phase (it closes the open phase and writes the targets); typical rates are a bulk at +0.25 to +0.5% bodyweight per week and a cut at -0.5 to -1% per week, so pick from those unless they give one. If the result's kcalSource is unchanged there wasn't enough logged data to estimate maintenance, so compute it with Mifflin-St Jeor as below, add the rate's surplus or deficit (kg per week x 7700 / 7 kcal per day), and call update_phase with daily_kcal. Adjust a phase with update_phase and close it with end_phase; answer "am I gaining too fast" from the GOAL PHASE line or get_phases. TRAINING, mesocycles follow Renaissance Periodization: weekly hard sets per muscle start near MEV and climb toward MRV as feedback allows, reps in reserve fall from 3 to 0 across the accumulation weeks, and the last week is a deload. To plan one, ask only what you need (days per week, muscles to prioritize, weeks with the default 5 including deload, equipment limits), then call create_mesocycle with a template or explicit days; list_exercises shows the library. When an active mesocycle exists and the user reports lifting ("bench 185 for 8, 8 and 7", "did 3 sets of curls with 30s"), log it with log_sets against the session instead of log_workout, then say what's left in the session. Every set records when it was finished, which is how rest periods and workout length are measured, so log sets as the user reports them and pass at only for sets they say were done earlier; sets sent together without times count as logged together with unknown rest. Answer rest, pace, and "how much have I done" questions from the session's progress and each set's restS (seconds since the previous set finished, which includes the set itself) via get_training_session, or from meso_sets.logged_at with query_user_data for history. Soreness, pump, joint pain, or how hard a muscle's work felt goes to set_muscle_feedback (map their words to the nearest answer). When they say the workout is done, call complete_session, which logs it as a workout and plans next week's same day. Use get_training_session for "what's my workout today" or targets, swap_exercise when they want a different movement, and end_mesocycle to stop one early. When the user states a lasting preference (dislikes yogurt, vegetarian, allergic to nuts), SAVE it — and never suggest foods that conflict with saved memories. REMINDERS, when the user asks to be reminded of something ("remind me to log lunch at noon", "ping me to weigh in on weekday mornings"), create it with set_reminder, and when they correct or adjust one ("no, 9am", "weekdays only") edit it in place with update_reminder using the id from your create result or list_reminders, never create a second one for the same thing. Cancellations use delete_reminder. Reminders DELIVER OVER IMESSAGE, if the tool result says phoneLinked is false, tell the user they won't receive reminder texts until they link their phone in their profile or text the skcal number. If the result says tzDefaulted is true, state the timezone you assumed and ask them to correct it if wrong. After creating one, confirm in plain words what was set, the time and the cadence. Today's date is ${today}. To move / re-date / fix which day food was logged on, first call list_food_log for the relevant day to find the exact meal or item, then move it. IMPORTANT: while calling tools, do NOT write any prose — just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed (item + from day → to day). Never repeat that confirmation.`;
+    (await buildCoachSystem(c, email, today, tzMin, mode)) +
+    (mode === "workout"
+      ? `\n\nLOGGING JUDGMENT, log immediately when the user states a workout they did, calling the log tool straight away; after logging, reply in one or two short sentences saying what you logged, and add advice only if the user asked for it. When the user sends a PHOTO of a workout screenshot or whiteboard, log it with log_workout. Tools: log workouts from the user's plain description with log_workout (pass their words through); for questions about their past training that no tool covers (volume, streaks, PRs, trends), write a read-only query with query_user_data rather than guessing; save durable user preferences/facts with remember and remove wrong ones with forget_memory. ${COACH_TRAINING_RULES} When the user states a lasting preference (hates lunges, bad shoulder, trains at home), SAVE it, and never program around saved memories. ${COACH_REMINDER_RULES} Today's date is ${today}. IMPORTANT: while calling tools, do NOT write any prose, just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed. Never repeat that confirmation.`
+      : `\n\nLOGGING JUDGMENT, log immediately when the user states something that happened (a meal eaten, a weigh-in, a workout done), calling the log tool straight away without first checking the log; after logging, reply in one or two short sentences, what you logged with its kcal and protein, then today's total and what's left, and add advice only if the user asked for it; when the conversation is exploratory ("should I eat", "what if", "how many calories are in"), answer first and ask before logging. When the user sends a PHOTO, look at it, food -> describe what you see and log it with log_meal, scale readout -> log_weight, workout screenshot -> log_workout, tape measure -> log_measurement. Tools: you can log meals with log_meal; view and reorganize the food log with list_food_log, move_meal, and move_food_item; clean up mistakes and duplicates with delete_meal and delete_food_item, and when the user corrects an entry ("that was actually 600 kcal", "it was two scoops") fix it in place with edit_food_item instead of deleting and relogging; record body measurements with log_measurement (inches); record weigh-ins with log_weight (pounds); answer questions about weight history (first weigh-in, lb lost per week, what they weighed on a date) with get_weight_history instead of guessing from the summary above; for any other question about their past data that no tool covers (averages, streaks, trends across meals, workouts or measurements), write a read-only query with query_user_data rather than guessing; log workouts from the user's plain description with log_workout (pass their words through); save durable user preferences/facts with remember and remove wrong ones with forget_memory; update daily calorie and protein targets with set_targets. When the user describes their day to day activity, a new job, a change in training volume, or a big lifestyle change, recompute their daily calorie target with Mifflin-St Jeor from the height, sex, and latest weigh-in in the context above, scaled by the closest activity multiplier, 1.2 sedentary, 1.375 lightly active, 1.55 moderately active, 1.725 very active, 1.9 athlete, then apply the deficit or surplus their current goal implies, state the new daily calorie and protein numbers plainly, and call set_targets with them, passing their activity in a few words. GOAL PHASES, when the user starts a bulk, cut, or maintenance block ("starting a lean bulk", "time to cut till March"), call start_phase (it closes the open phase and writes the targets); typical rates are a bulk at +0.25 to +0.5% bodyweight per week and a cut at -0.5 to -1% per week, so pick from those unless they give one. If the result's kcalSource is unchanged there wasn't enough logged data to estimate maintenance, so compute it with Mifflin-St Jeor as below, add the rate's surplus or deficit (kg per week x 7700 / 7 kcal per day), and call update_phase with daily_kcal. Adjust a phase with update_phase and close it with end_phase; answer "am I gaining too fast" from the GOAL PHASE line or get_phases. ${COACH_TRAINING_RULES} When the user states a lasting preference (dislikes yogurt, vegetarian, allergic to nuts), SAVE it — and never suggest foods that conflict with saved memories. ${COACH_REMINDER_RULES} Today's date is ${today}. To move / re-date / fix which day food was logged on, first call list_food_log for the relevant day to find the exact meal or item, then move it. IMPORTANT: while calling tools, do NOT write any prose — just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed (item + from day → to day). Never repeat that confirmation.`);
 
   const encoder = new TextEncoder();
   // NDJSON event protocol so the client renders tool calls as real parts rather
@@ -3630,7 +3776,7 @@ app.post("/api/agent/stream", async (c) => {
           let fast = true;
           for (let turn = 0; turn < 6 && !cancelled; turn++) {
             const startedAt = Date.now();
-            const msgStream = claudeStream(c.env, { max_tokens: 16000, system, messages: convo, tools: cachedTools(COACH_TOOLS) }, fast);
+            const msgStream = claudeStream(c.env, { max_tokens: 16000, system, messages: convo, tools: cachedTools(coachToolsFor(mode)) }, fast);
             current = msgStream;
             let sentAny = false;
             let text = "";
@@ -4563,6 +4709,7 @@ async function deleteAccount(c: EnvCtx, email: string): Promise<void> {
     d.delete(schema.measurements).where(eq(schema.measurements.userEmail, email)),
     d.delete(schema.photos).where(eq(schema.photos.userEmail, email)),
     d.delete(schema.targets).where(eq(schema.targets.userEmail, email)),
+    d.delete(schema.userSettings).where(eq(schema.userSettings.userEmail, email)),
     d.delete(schema.nutritionDays).where(eq(schema.nutritionDays.userEmail, email)),
     d.delete(schema.nutritionItems).where(eq(schema.nutritionItems.userEmail, email)),
     d.delete(schema.meals).where(eq(schema.meals.userEmail, email)),

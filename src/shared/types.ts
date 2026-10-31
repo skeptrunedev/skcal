@@ -49,6 +49,11 @@ export type NutritionDay = {
   adherence: Adherence | null;
 };
 
+// Account-wide app mode: "workout" is the workout-only app (no calories, food,
+// scale, or weigh-ins). Stored server-side so every platform follows it.
+export type AppMode = "full" | "workout";
+export type Settings = { mode: AppMode };
+
 export type Targets = {
   goalWeightKg: number | null;
   startWeightKg: number | null;

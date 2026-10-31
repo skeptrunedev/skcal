@@ -309,13 +309,13 @@ function AttachButton() {
   );
 }
 
-function Composer() {
+function Composer({ workoutOnly }: { workoutOnly: boolean }) {
   return (
     <ComposerPrimitive.Root className="composer">
       <div className="attach-row">
         <ComposerPrimitive.Attachments components={{ Attachment: AttachmentChip }} />
       </div>
-      <ComposerPrimitive.Input className="chat-input" placeholder="What are you thinking of eating?" autoFocus />
+      <ComposerPrimitive.Input className="chat-input" placeholder={workoutOnly ? "What are you training today?" : "What are you thinking of eating?"} autoFocus />
       {/* ChatGPT-style controls row under the full-width input: attach
           bottom-left, send/stop bottom-right. */}
       <div className="composer-controls">
@@ -342,10 +342,12 @@ export function CoachThread({
   initialMessages,
   initialConversationId,
   onPersisted,
+  workoutOnly,
 }: {
   initialMessages: CoachMessage[];
   initialConversationId: string | null;
   onPersisted: (id: string) => void;
+  workoutOnly: boolean;
 }) {
   const convIdRef = useRef<string | null>(initialConversationId);
   const onPersistedRef = useRef(onPersisted);
@@ -493,7 +495,7 @@ export function CoachThread({
         <ThreadPrimitive.Viewport className="chat-list" autoScroll>
           <ThreadPrimitive.Empty>
             <div className="chat-welcome">
-              <p className="chat-welcome-title">Ask before you eat.</p>
+              <p className="chat-welcome-title">{workoutOnly ? "Ask before you lift." : "Ask before you eat."}</p>
             </div>
           </ThreadPrimitive.Empty>
 
@@ -502,7 +504,7 @@ export function CoachThread({
           </ThreadPrimitive.Messages>
 
           <ThreadPrimitive.ViewportFooter className="chat-input-row">
-            <Composer />
+            <Composer workoutOnly={workoutOnly} />
           </ThreadPrimitive.ViewportFooter>
         </ThreadPrimitive.Viewport>
       </ThreadPrimitive.Root>

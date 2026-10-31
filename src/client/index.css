@@ -1761,6 +1761,56 @@ a {
 .profile-menu-item:hover {
   background: rgba(255, 255, 255, 0.06);
 }
+.profile-menu-section {
+  margin: 0;
+  padding: 0.5rem 0.6rem 0.35rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.profile-menu-hint {
+  margin: 0;
+  padding: 0.4rem 0.6rem 0.2rem;
+  color: var(--dim);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.profile-menu-divider {
+  height: 1px;
+  margin: 0.35rem 0.2rem;
+  background: var(--line);
+}
+/* Two-way segmented control (app mode), matching the mobile app's. */
+.segment {
+  display: flex;
+  gap: 2px;
+  margin: 0 0.35rem;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.segment-item {
+  flex: 1;
+  padding: 0.42rem 0.3rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background-color 120ms var(--ease-out);
+}
+.segment-item:hover:not(.on) {
+  background: rgba(255, 255, 255, 0.06);
+}
+.segment-item.on {
+  background: var(--accent);
+  color: #17181a;
+  font-weight: 700;
+}
 
 .drawer-backdrop {
   display: none;

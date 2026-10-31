@@ -34,6 +34,7 @@ const OWNED: [table: string, column: "user_email" | "user_id" | "phone" | "conve
   ["measurements", "user_email"],
   ["photos", "user_email"],
   ["targets", "user_email"],
+  ["user_settings", "user_email"],
   ["nutrition_days", "user_email"],
   ["meals", "user_email"],
   ["nutrition_items", "user_email"],
@@ -101,6 +102,7 @@ async function seedAccount(mf: Miniflare, tag: string, stripeCustomerId: string 
     db.prepare("INSERT INTO measurements (user_email, site, value_cm) VALUES (?1, 'waist', 80)").bind(email),
     db.prepare("INSERT INTO photos (user_email, r2_key) VALUES (?1, ?2)").bind(email, progressKey),
     db.prepare("INSERT INTO targets (user_email) VALUES (?1)").bind(email),
+    db.prepare("INSERT INTO user_settings (user_email, mode) VALUES (?1, 'workout')").bind(email),
     db.prepare("INSERT INTO nutrition_days (user_email, date, kcal) VALUES (?1, '2026-09-26', 2000)").bind(email),
     db
       .prepare("INSERT INTO meals (id, user_email, date, photo_keys) VALUES (?1, ?2, '2026-09-26', ?3)")

@@ -409,6 +409,62 @@
         }
       }
     },
+    "/api/settings": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Get app settings",
+        "description": "Returns the caller's app preferences, which every client on the account follows.",
+        "operationId": "getSettings",
+        "responses": {
+          "200": {
+            "description": "The caller's settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Update app settings",
+        "description": "Changes the caller's app preferences on every platform at once; omitted fields are left unchanged.",
+        "operationId": "updateSettings",
+        "requestBody": {
+          "required": true,
+          "description": "The settings to change.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings after the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
     "/api/dashboard": {
       "get": {
         "tags": [
@@ -3283,6 +3339,41 @@
             ],
             "description": "Calorie adherence bucket to set.",
             "example": "on"
+          }
+        }
+      },
+      "Settings": {
+        "type": "object",
+        "description": "The caller's app preferences, shared by every client on the account.",
+        "additionalProperties": false,
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "full",
+              "workout"
+            ],
+            "description": "full tracks training, nutrition, and body weight. workout is workout-only, with no calories, food logging, scale, or weigh-ins in the apps, and an agent that only coaches training.",
+            "example": "workout"
+          }
+        }
+      },
+      "SettingsInput": {
+        "type": "object",
+        "description": "Settings to change; omitted fields are left unchanged.",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "full",
+              "workout"
+            ],
+            "description": "The app mode to switch to.",
+            "example": "workout"
           }
         }
       },

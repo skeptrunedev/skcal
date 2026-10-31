@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { PanelLeft, Plus } from "lucide-react";
-import type { DashboardData } from "../shared/types";
+import type { AppMode, DashboardData } from "../shared/types";
 import { api, todayLocal } from "./api";
 import { Dashboard } from "./Dashboard";
 import { AddSheet } from "./AddSheet";
@@ -127,6 +127,27 @@ export default function App() {
       .then(setBilling)
       .catch(() => setBilling({ active: true, exempt: false, source: null, status: null, periodEnd: null, priceUsd: 100 }));
   }, [email]);
+  // Account-wide app mode (shared with the iOS and Android apps). "workout"
+  // strips calories, food, the scale, and weigh-ins out of every screen.
+  const [mode, setMode] = useState<AppMode>("full");
+  useEffect(() => {
+    if (!email) return;
+    api.settings().then((s) => setMode(s.mode)).catch(() => {});
+  }, [email]);
+  // Optimistic: flip the UI now, adopt what the server stored, and fall back
+  // to the previous mode if the save fails.
+  const changeMode = useCallback(
+    (next: AppMode) => {
+      const prev = mode;
+      setMode(next);
+      api
+        .updateSettings({ mode: next })
+        .then((s) => setMode(s.mode))
+        .catch(() => setMode(prev));
+    },
+    [mode],
+  );
+  const workoutOnly = mode === "workout";
   // Desktop: whether the persistent sidebar is collapsed (remembered).
   const [navCollapsed, setNavCollapsed] = useState(() => localStorage.getItem("skcal-nav-collapsed") === "1");
   const coach = useCoachHistory();
@@ -335,10 +356,16 @@ export default function App() {
       <NavDrawer
         view={view}
         onNavigate={navigate}
-        onAdd={() => {
-          setDrawerOpen(false);
-          setAdding(true);
-        }}
+        onAdd={
+          workoutOnly
+            ? null
+            : () => {
+                setDrawerOpen(false);
+                setAdding(true);
+              }
+        }
+        mode={mode}
+        onModeChange={changeMode}
         open={drawerOpen}
         // Mobile: close the drawer. Desktop: collapse the persistent sidebar.
         onClose={() => {
@@ -392,7 +419,7 @@ export default function App() {
             <PanelLeft />
           </button>
           <span className="topbar-title">{view === "coach" ? "Agent" : view === "train" ? "Train" : "Today"}</span>
-          {view === "today" && (
+          {view === "today" && !workoutOnly && (
             <button className="nav-icon-btn topbar-add" onClick={() => setAdding(true)} aria-label="Log entry">
               <Plus />
             </button>
@@ -402,7 +429,7 @@ export default function App() {
         <main className={`shell ${view === "coach" ? "shell-coach" : ""}`}>
           {error && <p className="form-err">{error}</p>}
           {!data && !error && <p className="meta">loading…</p>}
-          {data && view === "today" && <Dashboard data={data} date={day} onDateChange={setDay} refreshKey={tick} onChange={reloadAll} />}
+          {data && view === "today" && <Dashboard data={data} date={day} onDateChange={setDay} refreshKey={tick} onChange={reloadAll} workoutOnly={workoutOnly} />}
           {data && view === "train" && <Train />}
           {data && view === "coach" && (
             <CoachThread
@@ -410,12 +437,13 @@ export default function App() {
               initialMessages={coach.session.messages}
               initialConversationId={coach.session.convId}
               onPersisted={onPersisted}
+              workoutOnly={workoutOnly}
             />
           )}
         </main>
       </div>
 
-      {adding && (
+      {adding && !workoutOnly && (
         <AddSheet
           onClose={() => setAdding(false)}
           onChange={reloadAll}

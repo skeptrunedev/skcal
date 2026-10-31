@@ -77,15 +77,22 @@ export async function connectAppleHealth(): Promise<boolean> {
 
 // Pull new samples since each anchor and log them. Returns what was posted,
 // or null when not connected / not supported. Each stream fails independently
-// so a workout-parse hiccup doesn't block weight syncing.
-export async function syncAppleHealth(): Promise<{ weights: number; workouts: number } | null> {
+// so a workout-parse hiccup doesn't block weight syncing. Workout-only mode
+// passes weights: false: body mass stays in Apple Health, and its anchor holds
+// still, so switching back to the full app picks up from where it left off.
+export async function syncAppleHealth({ weights = true }: { weights?: boolean } = {}): Promise<{
+  weights: number;
+  workouts: number;
+} | null> {
   const m = hk();
   if (!m || !(await isHealthConnected())) return null;
   const result = { weights: 0, workouts: 0 };
-  try {
-    result.weights = await syncWeights(m);
-  } catch {
-    // leave the anchor where the last successful post put it; retry next sync
+  if (weights) {
+    try {
+      result.weights = await syncWeights(m);
+    } catch {
+      // leave the anchor where the last successful post put it; retry next sync
+    }
   }
   try {
     result.workouts = await syncWorkouts(m);

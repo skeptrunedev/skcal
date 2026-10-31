@@ -785,6 +785,13 @@ export type Billing = {
 };
 export const billing = () => call<Billing>(`/api/billing`);
 
+// ---- Settings (account-wide, same shapes as src/shared/types.ts) ----
+// "workout" is the workout-only app: no calories, food, scale, or weigh-ins.
+export type AppMode = "full" | "workout";
+export type Settings = { mode: AppMode };
+export const getSettings = () => call<Settings>(`/api/settings`);
+export const updateSettings = (patch: Partial<Settings>) => call<Settings>(`/api/settings`, "PUT", patch);
+
 // ---- Apple in-app purchase ----
 // Both routes are exempt from the worker's 402 subscription gate, so an
 // unsubscribed account can still reach them to buy or restore.

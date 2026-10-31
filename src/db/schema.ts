@@ -295,6 +295,29 @@ const nowMs = sql`(unixepoch() * 1000)`;
  *           enum: [under, on, over, null]
  *           description: Calorie adherence bucket to set.
  *           example: on
+ *     Settings:
+ *       type: object
+ *       description: The caller's app preferences, shared by every client on the account.
+ *       additionalProperties: false
+ *       required: [mode]
+ *       properties:
+ *         mode:
+ *           type: string
+ *           enum: [full, workout]
+ *           description: >-
+ *             full tracks training, nutrition, and body weight. workout is workout-only, with no calories,
+ *             food logging, scale, or weigh-ins in the apps, and an agent that only coaches training.
+ *           example: workout
+ *     SettingsInput:
+ *       type: object
+ *       description: Settings to change; omitted fields are left unchanged.
+ *       additionalProperties: false
+ *       properties:
+ *         mode:
+ *           type: string
+ *           enum: [full, workout]
+ *           description: The app mode to switch to.
+ *           example: workout
  *     Targets:
  *       type: object
  *       description: A user's goals. Created with defaults on first read.
@@ -917,6 +940,18 @@ export const targets = sqliteTable("targets", {
   proteinTargetG: integer("protein_target_g").default(160),
   heightCm: real("height_cm"),
   sex: text("sex", { enum: ["male", "female", "other"] }),
+});
+
+// Per-user app preferences that follow the account across iOS, Android, and
+// web. A missing row means the defaults. `mode` = "workout" turns skcal into a
+// workout-only app: no calories, food, scale, weigh-ins, or goal phases in the
+// UI, and an agent that only coaches training.
+export const APP_MODES = ["full", "workout"] as const;
+export type AppMode = (typeof APP_MODES)[number];
+export const userSettings = sqliteTable("user_settings", {
+  userEmail: text("user_email").primaryKey(),
+  mode: text("mode", { enum: APP_MODES }).notNull().default("full"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
 });
 
 // Per-day nutrition, one row per (user, date).
