@@ -7,6 +7,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Also dispatchable so the release workflow can run these checks on its
+  # release PR, which GITHUB_TOKEN authored (so no pull_request event fires).
+  workflow_dispatch:
 
 jobs:
   openapi-and-build:

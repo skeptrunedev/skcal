@@ -11,6 +11,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   release-please:
@@ -24,10 +25,10 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          # A PAT (not GITHUB_TOKEN) so the release PR is authored by a real
-          # user and therefore TRIGGERS CI — which is what auto-merge waits on.
-          # Falls back to GITHUB_TOKEN (PR opens, but CI won't run on it).
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN is enough: events made with it don't trigger
+          # pull_request workflows, so the auto-merge step below dispatches the
+          # CI workflow itself via workflow_dispatch (the documented exception).
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       # Turn on auto-merge for the release PR so it merges itself once the
       # required CI checks (incl. integration tests) go green. Requires the repo
@@ -35,7 +36,7 @@ jobs:
       - name: Enable auto-merge on the release PR
         if: ${{ steps.rp.outputs['packages/cli--release_created'] != 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           # The PR is created moments earlier in this same job; allow for label
@@ -47,6 +48,14 @@ jobs:
             sleep 3
           done
           if [ -n "$pr" ]; then
+            # The release PR was opened with GITHUB_TOKEN, and events made with
+            # GITHUB_TOKEN don't trigger pull_request workflows. workflow_dispatch
+            # is the documented exception, so dispatch CI at the PR's head branch.
+            # That run reports the required checks ('OpenAPI + typecheck + build',
+            # 'CLI typecheck + build') on the PR's head commit, which is what
+            # branch protection and auto-merge wait on.
+            branch=$(gh pr view "$pr" --json headRefName --jq .headRefName)
+            gh workflow run ci.yml --ref "$branch"
             gh pr merge "$pr" --auto --squash && echo "auto-merge enabled on PR #$pr"
           else
             echo "no pending release PR"
