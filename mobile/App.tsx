@@ -34,6 +34,7 @@ import { ApiKeys } from "./src/ApiKeys";
 import { LinkedNumbers } from "./src/LinkedNumbers";
 import { reconcilePendingTransactions, watchTransactions } from "./src/iap";
 import { pickFromLibrary, toUpload } from "./src/image";
+import { useOtaUpdates } from "./src/updates";
 import { PanelLeftIcon, PlusIcon } from "./src/icons";
 
 // Content height of the top bar (below the status-bar inset).
@@ -407,6 +408,7 @@ function Shell() {
 }
 
 export default function App() {
+  useOtaUpdates();
   return (
     <SafeAreaProvider>
       <ThemeProvider>
