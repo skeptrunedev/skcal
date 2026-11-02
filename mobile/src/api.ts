@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
+import { File as FsFile } from "expo-file-system";
 // RN's global fetch can't expose a streaming response body; expo/fetch returns
 // a web-standard streaming Response so we can read the NDJSON token stream.
 import { fetch as streamFetch } from "expo/fetch";
@@ -488,13 +489,17 @@ export async function editMealItem(id: number, patch: { name?: string; kcal?: nu
 /** <Image> source for a meal photo key (owner-scoped, so it needs the bearer). */
 export const mealPhotoSource = (key: string) => photoSource(`/api/nutrition/photo/${key}`);
 
-// A picked photo as a multipart part. Native fetch streams a file URI as-is;
-// the Expo-web preview has to hand FormData a real Blob.
-export type UploadImage = { uri: string; mimeType?: string | null };
+// A picked photo as a multipart part. Since SDK 57 the global fetch on iOS and
+// Android is expo/fetch, whose multipart encoder rejects React Native's
+// { uri, name, type } parts ("Unsupported FormDataPart implementation"). It
+// takes Blob-like parts, so native hands it an expo-file-system File, which
+// reads the bytes itself and labels the part from the file's extension (the
+// picker writes .jpg/.png/... to match the bytes it saved). The Expo-web
+// preview hands FormData a real Blob.
+export type UploadImage = { uri: string };
 async function appendImage(fd: FormData, field: string, img: UploadImage, name: string): Promise<void> {
-  const type = img.mimeType || "image/jpeg";
   if (WEB) fd.append(field, await (await globalThis.fetch(img.uri)).blob(), name);
-  else fd.append(field, { uri: img.uri, name, type } as unknown as Blob);
+  else fd.append(field, new FsFile(img.uri) as unknown as Blob);
 }
 
 // What the meal analyzer logged, as on the web AddSheet's nutrition tab.

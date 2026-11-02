@@ -7,6 +7,7 @@
     "@kingstinct/react-native-healthkit": "^14.0.2",
     "expo": "~57.0.31",
     "expo-clipboard": "~57.0.2",
+    "expo-file-system": "~57.0.7",
     "expo-image-picker": "~57.0.20",
     "expo-secure-store": "~57.0.4",
     "expo-splash-screen": "~57.0.10",
