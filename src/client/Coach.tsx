@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   AssistantRuntimeProvider,
@@ -14,6 +14,7 @@ import {
   type ChatModelAdapter,
   type ChatModelRunResult,
   type EmptyMessagePartProps,
+  type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import { ArrowUp, Square, Camera, Check, ImagePlus, Loader2, X } from "lucide-react";
@@ -132,7 +133,67 @@ const TOOL_LABELS: Record<string, string> = {
   update_reminder: "Updating reminder",
   list_reminders: "Reading reminders",
   delete_reminder: "Deleting reminder",
+  set_profile: "Saving your profile",
+  finish_onboarding: "Finishing setup",
+  get_phases: "Reading your plan",
+  start_phase: "Starting your plan",
+  update_phase: "Updating your plan",
+  end_phase: "Ending your plan",
+  list_exercises: "Browsing exercises",
+  create_mesocycle: "Building your program",
+  get_training_session: "Reading your workout",
+  log_sets: "Logging sets",
+  set_muscle_feedback: "Saving feedback",
+  complete_session: "Finishing workout",
+  swap_exercise: "Swapping exercise",
+  end_mesocycle: "Ending program",
+  update_mesocycle: "Updating program",
+  delete_mesocycle: "Deleting program",
+  add_training_day: "Adding a workout",
+  update_training_day: "Updating workout",
+  delete_training_day: "Deleting workout",
+  add_day_exercise: "Adding exercise",
+  remove_day_exercise: "Removing exercise",
+  add_set: "Adding a set",
+  edit_set: "Fixing set",
+  delete_set: "Deleting set",
 };
+
+// First-run setup: the agent interviews a new account, opening with this
+// question and its answers as chips (the worker's ONBOARDING_RULES expect it).
+const ONBOARDING_GREETING_TEXT = "Hey, I'm your skcal coach. I'll set up your calories and plan in about a minute. What are you here for?";
+const ONBOARDING_GOALS = ["Lose fat", "Build muscle", "Maintain my weight", "Just track my lifts"];
+const GREETING_CALL_ID = "onboarding-greeting";
+
+// Lets the greeting's chips offer "Skip setup" without threading props through
+// assistant-ui's part renderers.
+const OnboardingContext = createContext<{ onSkip?: () => void }>({});
+
+// The agent's quick replies (its offer_choices call): tap to send. Only the
+// newest reply's choices are live, and only once it has finished.
+function ChoicesTool({ args, toolCallId }: ToolCallMessagePartProps) {
+  const { onSkip } = useContext(OnboardingContext);
+  const options = Array.isArray(args.options) ? (args.options as unknown[]).filter((o): o is string => typeof o === "string") : [];
+  if (!options.length) return null;
+  return (
+    <MessagePrimitive.If last>
+      <ThreadPrimitive.If running={false}>
+        <div className="quick-replies">
+          {options.map((o) => (
+            <ThreadPrimitive.Suggestion key={o} prompt={o} send className="quick-reply">
+              {o}
+            </ThreadPrimitive.Suggestion>
+          ))}
+          {toolCallId === GREETING_CALL_ID && onSkip && (
+            <button type="button" className="quick-skip" onClick={onSkip}>
+              Skip setup
+            </button>
+          )}
+        </div>
+      </ThreadPrimitive.If>
+    </MessagePrimitive.If>
+  );
+}
 
 // Shown while the coach is working but nothing visible is streaming: before
 // the first token (the model always thinks first) and after a tool finishes,
@@ -195,7 +256,9 @@ function UserMessage() {
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="bubble bubble-assistant">
-      <MessagePrimitive.Parts components={{ Text: MarkdownText, Empty: Thinking, tools: { Fallback: ToolFallback } }} />
+      <MessagePrimitive.Parts
+        components={{ Text: MarkdownText, Empty: Thinking, tools: { by_name: { offer_choices: ChoicesTool }, Fallback: ToolFallback } }}
+      />
     </MessagePrimitive.Root>
   );
 }
@@ -343,11 +406,16 @@ export function CoachThread({
   initialConversationId,
   onPersisted,
   workoutOnly,
+  onboarding = false,
+  onSkipOnboarding,
 }: {
   initialMessages: CoachMessage[];
   initialConversationId: string | null;
   onPersisted: (id: string) => void;
   workoutOnly: boolean;
+  /** A new account: open on the setup interview instead of an empty chat. */
+  onboarding?: boolean;
+  onSkipOnboarding?: () => void;
 }) {
   const convIdRef = useRef<string | null>(initialConversationId);
   const onPersistedRef = useRef(onPersisted);
@@ -417,7 +485,7 @@ export function CoachThread({
         const handle = (line: string) => {
           const s = line.trim();
           if (!s) return;
-          let ev: { t: string; v?: string; id?: string; name?: string; args?: unknown; result?: unknown };
+          let ev: { t: string; v?: string; id?: string; name?: string; args?: unknown; result?: unknown; options?: unknown };
           try {
             ev = JSON.parse(s);
           } catch {
@@ -443,6 +511,17 @@ export function CoachThread({
           } else if (ev.t === "result") {
             const p = parts.find((x) => x.type === "tool-call" && x.toolCallId === String(ev.id));
             if (p && p.type === "tool-call") p.result = ev.result;
+          } else if (ev.t === "choices" && Array.isArray(ev.options)) {
+            // Quick replies ride as a finished offer_choices call (ChoicesTool).
+            cur = null;
+            parts.push({
+              type: "tool-call",
+              toolCallId: `choices-${parts.length}`,
+              toolName: "offer_choices",
+              args: { options: ev.options },
+              argsText: JSON.stringify({ options: ev.options }),
+              result: "shown",
+            });
           } else if (ev.t === "error") {
             // The reply failed partway; say so rather than ending on silence.
             cur = { type: "text", text: String((ev as { message?: unknown }).message ?? "The coach couldn't finish that reply. Please try again.") };
@@ -484,12 +563,33 @@ export function CoachThread({
     [],
   );
 
+  const seeded =
+    onboarding && !initialMessages.length
+      ? [
+          {
+            role: "assistant" as const,
+            content: [
+              { type: "text" as const, text: ONBOARDING_GREETING_TEXT },
+              {
+                type: "tool-call" as const,
+                toolCallId: GREETING_CALL_ID,
+                toolName: "offer_choices",
+                args: { options: ONBOARDING_GOALS },
+                argsText: JSON.stringify({ options: ONBOARDING_GOALS }),
+                result: "shown",
+              },
+            ],
+          },
+        ]
+      : initialMessages.map((m) => ({ role: m.role, content: m.content }));
   const runtime = useLocalRuntime(adapter, {
-    initialMessages: initialMessages.map((m) => ({ role: m.role, content: m.content })),
+    initialMessages: seeded,
     adapters: { attachments: new SimpleImageAttachmentAdapter() },
   });
+  const onboardingCtx = useMemo(() => ({ onSkip: onSkipOnboarding }), [onSkipOnboarding]);
 
   return (
+    <OnboardingContext.Provider value={onboardingCtx}>
     <AssistantRuntimeProvider runtime={runtime}>
       <ThreadPrimitive.Root className="coach">
         <ThreadPrimitive.Viewport className="chat-list" autoScroll>
@@ -509,5 +609,6 @@ export function CoachThread({
         </ThreadPrimitive.Viewport>
       </ThreadPrimitive.Root>
     </AssistantRuntimeProvider>
+    </OnboardingContext.Provider>
   );
 }

@@ -20,8 +20,6 @@ import { shiftDay, dayLabel } from "./dates";
 
 // Fallback targets until a phase or the targets endpoint sets real ones, as
 // on the web dashboard.
-const DEFAULT_KCAL_TARGET = 1850;
-const DEFAULT_PROTEIN_TARGET = 160;
 
 // "08:00" in the reminder's tz → "8:00 AM CDT · weekdays" style, mirroring the
 // web card. Hermes ships Intl, but guard timeZoneName and fall back to the raw
@@ -364,12 +362,13 @@ export function Today({
   const nutrition = data.nutritionToday;
   const kcal = nutrition?.kcal ?? null;
   const protein = nutrition?.proteinG ?? null;
-  const kcalTarget = targets.dailyKcalTarget ?? DEFAULT_KCAL_TARGET;
-  const proteinTarget = targets.proteinTargetG ?? DEFAULT_PROTEIN_TARGET;
-  const kcalPct = kcal != null ? Math.min(100, (kcal / kcalTarget) * 100) : 0;
-  const proteinPct = protein != null ? Math.min(100, (protein / proteinTarget) * 100) : 0;
-  const kcalOver = kcal != null && kcal > kcalTarget;
-  const proteinHit = protein != null && protein >= proteinTarget;
+  // Null until the user (or the agent's setup) sets them: no bar to fill then.
+  const kcalTarget = targets.dailyKcalTarget;
+  const proteinTarget = targets.proteinTargetG;
+  const kcalPct = kcal != null && kcalTarget ? Math.min(100, (kcal / kcalTarget) * 100) : 0;
+  const proteinPct = protein != null && proteinTarget ? Math.min(100, (protein / proteinTarget) * 100) : 0;
+  const kcalOver = kcal != null && kcalTarget != null && kcal > kcalTarget;
+  const proteinHit = protein != null && proteinTarget != null && protein >= proteinTarget;
   const nutStatus = nutrition?.adherence
     ? {
         under: { label: "UNDER", color: c.info },
@@ -433,25 +432,30 @@ export function Today({
               <Text style={s.mname}>CALORIES</Text>
               <Text style={s.nutVal}>
                 {kcal ?? "—"}
-                <Text style={s.nutUnit}> / {kcalTarget}</Text>
+                <Text style={s.nutUnit}>{kcalTarget != null ? ` / ${kcalTarget}` : " kcal"}</Text>
               </Text>
             </View>
-            <View style={s.bar}>
-              <View style={[s.barFill, { width: `${kcalPct}%` as DimensionValue, backgroundColor: kcalOver ? c.attention : c.info }]} />
-            </View>
+            {kcalTarget != null && (
+              <View style={s.bar}>
+                <View style={[s.barFill, { width: `${kcalPct}%` as DimensionValue, backgroundColor: kcalOver ? c.attention : c.info }]} />
+              </View>
+            )}
           </View>
           <View style={s.nutRow}>
             <View style={s.nutTop}>
               <Text style={s.mname}>PROTEIN</Text>
               <Text style={s.nutVal}>
                 {protein != null ? Math.round(protein) : "—"}
-                <Text style={s.nutUnit}> / {proteinTarget} g</Text>
+                <Text style={s.nutUnit}>{proteinTarget != null ? ` / ${proteinTarget} g` : " g"}</Text>
               </Text>
             </View>
-            <View style={s.bar}>
-              <View style={[s.barFill, { width: `${proteinPct}%` as DimensionValue, backgroundColor: proteinHit ? c.amber : c.info }]} />
-            </View>
+            {proteinTarget != null && (
+              <View style={s.bar}>
+                <View style={[s.barFill, { width: `${proteinPct}%` as DimensionValue, backgroundColor: proteinHit ? c.amber : c.info }]} />
+              </View>
+            )}
           </View>
+          {(kcalTarget == null || proteinTarget == null) && <Text style={s.remEmpty}>no targets yet, ask the agent to set them</Text>}
         </>
       )}
     </View>

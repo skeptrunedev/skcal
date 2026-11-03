@@ -52,7 +52,7 @@ export type NutritionDay = {
 // Account-wide app mode: "workout" is the workout-only app (no calories, food,
 // scale, or weigh-ins). Stored server-side so every platform follows it.
 export type AppMode = "full" | "workout";
-export type Settings = { mode: AppMode };
+export type Settings = { mode: AppMode; onboarded: boolean };
 
 export type Targets = {
   goalWeightKg: number | null;
@@ -63,6 +63,7 @@ export type Targets = {
   proteinTargetG: number | null;
   heightCm: number | null;
   sex: "male" | "female" | "other" | null;
+  birthYear: number | null;
 };
 
 // A goal phase (bulk / cut / maintain) with planned vs actual weekly rate.

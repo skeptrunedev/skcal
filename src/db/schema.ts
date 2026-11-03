@@ -299,7 +299,7 @@ const nowMs = sql`(unixepoch() * 1000)`;
  *       type: object
  *       description: The caller's app preferences, shared by every client on the account.
  *       additionalProperties: false
- *       required: [mode]
+ *       required: [mode, onboarded]
  *       properties:
  *         mode:
  *           type: string
@@ -308,6 +308,12 @@ const nowMs = sql`(unixepoch() * 1000)`;
  *             full tracks training, nutrition, and body weight. workout is workout-only, with no calories,
  *             food logging, scale, or weigh-ins in the apps, and an agent that only coaches training.
  *           example: workout
+ *         onboarded:
+ *           type: boolean
+ *           description: >-
+ *             False for a new account that hasn't finished first-run setup; the apps open the agent's
+ *             onboarding interview until it's true.
+ *           example: true
  *     SettingsInput:
  *       type: object
  *       description: Settings to change; omitted fields are left unchanged.
@@ -318,11 +324,16 @@ const nowMs = sql`(unixepoch() * 1000)`;
  *           enum: [full, workout]
  *           description: The app mode to switch to.
  *           example: workout
+ *         onboarded:
+ *           type: boolean
+ *           enum: [true]
+ *           description: True finishes or skips first-run onboarding.
+ *           example: true
  *     Targets:
  *       type: object
- *       description: A user's goals. Created with defaults on first read.
+ *       description: A user's goals and body profile. Created empty on first read; every goal is null until set.
  *       additionalProperties: false
- *       required: [id, goalWeightKg, startWeightKg, targetDate, startDate, dailyKcalTarget, proteinTargetG, heightCm, sex]
+ *       required: [id, goalWeightKg, startWeightKg, targetDate, startDate, dailyKcalTarget, proteinTargetG, heightCm, sex, birthYear]
  *       properties:
  *         id:
  *           type: integer
@@ -363,6 +374,10 @@ const nowMs = sql`(unixepoch() * 1000)`;
  *           enum: [male, female, other, null]
  *           description: Sex used for calorie math.
  *           example: male
+ *         birthYear:
+ *           type: [integer, "null"]
+ *           description: Birth year, for the age in calorie math.
+ *           example: 1998
  *     TargetsInput:
  *       type: object
  *       description: Partial update to a user's targets; omitted fields are left unchanged.
@@ -940,6 +955,7 @@ export const targets = sqliteTable("targets", {
   proteinTargetG: integer("protein_target_g").default(160),
   heightCm: real("height_cm"),
   sex: text("sex", { enum: ["male", "female", "other"] }),
+  birthYear: integer("birth_year"), // age for Mifflin-St Jeor, stored as a year so it stays right
 });
 
 // Per-user app preferences that follow the account across iOS, Android, and
@@ -952,6 +968,9 @@ export const userSettings = sqliteTable("user_settings", {
   userEmail: text("user_email").primaryKey(),
   mode: text("mode", { enum: APP_MODES }).notNull().default("full"),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+  // When the agent's first-run setup finished (or was skipped). Null = a new
+  // account that still gets the onboarding interview.
+  onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }),
 });
 
 // Per-day nutrition, one row per (user, date).

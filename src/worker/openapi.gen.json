@@ -3629,7 +3629,8 @@
         "description": "The caller's app preferences, shared by every client on the account.",
         "additionalProperties": false,
         "required": [
-          "mode"
+          "mode",
+          "onboarded"
         ],
         "properties": {
           "mode": {
@@ -3640,6 +3641,11 @@
             ],
             "description": "full tracks training, nutrition, and body weight. workout is workout-only, with no calories, food logging, scale, or weigh-ins in the apps, and an agent that only coaches training.",
             "example": "workout"
+          },
+          "onboarded": {
+            "type": "boolean",
+            "description": "False for a new account that hasn't finished first-run setup; the apps open the agent's onboarding interview until it's true.",
+            "example": true
           }
         }
       },
@@ -3656,12 +3662,20 @@
             ],
             "description": "The app mode to switch to.",
             "example": "workout"
+          },
+          "onboarded": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "True finishes or skips first-run onboarding.",
+            "example": true
           }
         }
       },
       "Targets": {
         "type": "object",
-        "description": "A user's goals. Created with defaults on first read.",
+        "description": "A user's goals and body profile. Created empty on first read; every goal is null until set.",
         "additionalProperties": false,
         "required": [
           "id",
@@ -3672,7 +3686,8 @@
           "dailyKcalTarget",
           "proteinTargetG",
           "heightCm",
-          "sex"
+          "sex",
+          "birthYear"
         ],
         "properties": {
           "id": {
@@ -3751,6 +3766,14 @@
             ],
             "description": "Sex used for calorie math.",
             "example": "male"
+          },
+          "birthYear": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Birth year, for the age in calorie math.",
+            "example": 1998
           }
         }
       },

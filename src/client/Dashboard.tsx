@@ -100,10 +100,11 @@ export function Dashboard({
   // nutrition bars
   const kcal = nutritionToday?.kcal ?? null;
   const protein = nutritionToday?.proteinG ?? null;
-  const kcalTarget = targets.dailyKcalTarget ?? 1850;
-  const proteinTarget = targets.proteinTargetG ?? 160;
-  const kcalPct = kcal != null ? Math.min(100, (kcal / kcalTarget) * 100) : 0;
-  const proteinPct = protein != null ? Math.min(100, (protein / proteinTarget) * 100) : 0;
+  // Null until the user (or the agent's setup) sets them: no bar to fill then.
+  const kcalTarget = targets.dailyKcalTarget;
+  const proteinTarget = targets.proteinTargetG;
+  const kcalPct = kcal != null && kcalTarget ? Math.min(100, (kcal / kcalTarget) * 100) : 0;
+  const proteinPct = protein != null && proteinTarget ? Math.min(100, (protein / proteinTarget) * 100) : 0;
   const nutStatus = nutritionToday?.adherence
     ? ({ under: ["info", "UNDER"], on: ["good", "ON TARGET"], over: ["attention", "OVER"] } as const)[
         nutritionToday.adherence
@@ -179,25 +180,30 @@ export function Dashboard({
                     <span className="crow-label">Calories</span>
                     <span className="crow-val">
                       {kcal ?? "—"}
-                      <span className="unit"> / {kcalTarget}</span>
+                      <span className="unit">{kcalTarget != null ? ` / ${kcalTarget}` : " kcal"}</span>
                     </span>
                   </div>
-                  <div className="crow-bar">
-                    <span className={kcal != null && kcal > kcalTarget ? "attention" : "info"} style={{ width: `${kcalPct}%` }} />
-                  </div>
+                  {kcalTarget != null && (
+                    <div className="crow-bar">
+                      <span className={kcal != null && kcal > kcalTarget ? "attention" : "info"} style={{ width: `${kcalPct}%` }} />
+                    </div>
+                  )}
                 </div>
                 <div className="crow">
                   <div className="crow-top">
                     <span className="crow-label">Protein</span>
                     <span className="crow-val">
                       {protein ?? "—"}
-                      <span className="unit"> / {proteinTarget} g</span>
+                      <span className="unit">{proteinTarget != null ? ` / ${proteinTarget} g` : " g"}</span>
                     </span>
                   </div>
-                  <div className="crow-bar">
-                    <span className={protein != null && protein >= proteinTarget ? "" : "info"} style={{ width: `${proteinPct}%` }} />
-                  </div>
+                  {proteinTarget != null && (
+                    <div className="crow-bar">
+                      <span className={protein != null && protein >= proteinTarget ? "" : "info"} style={{ width: `${proteinPct}%` }} />
+                    </div>
+                  )}
                 </div>
+                {(kcalTarget == null || proteinTarget == null) && <p className="empty">no targets yet, ask the agent to set them</p>}
               </div>
             )}
           </section>

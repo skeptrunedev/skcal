@@ -164,14 +164,17 @@ type AgentEvent =
   | { t: "error"; message?: string }
   | { t: "text"; v?: string }
   | { t: "tool"; id?: string; name?: string; args?: unknown }
-  | { t: "result"; id?: string; result?: unknown };
+  | { t: "result"; id?: string; result?: unknown }
+  | { t: "choices"; options?: unknown };
 
 // What a streamed reply renders as, in order (the web thread's assistant-ui
 // parts): text runs and the tool calls between them, each tool done once its
 // result is back.
 export type AgentStreamPart =
   | { type: "text"; text: string }
-  | { type: "tool"; id: string; name: string; done: boolean };
+  | { type: "tool"; id: string; name: string; done: boolean }
+  // Tap-to-send quick replies the agent offered at the end of its reply.
+  | { type: "choices"; options: string[] };
 
 // Same copy as the web coach when a reply fails partway.
 const REPLY_FAILED = "The coach couldn't finish that reply. Please try again.";
@@ -259,6 +262,13 @@ export async function agentStream(
       const p = parts.find((x) => x.type === "tool" && x.id === String(ev.id));
       if (p && p.type === "tool") p.done = true;
       emit();
+    } else if (ev.t === "choices") {
+      const options = Array.isArray(ev.options) ? ev.options.filter((o): o is string => typeof o === "string") : [];
+      if (options.length) {
+        cur = null;
+        parts.push({ type: "choices", options });
+        emit();
+      }
     } else if (ev.t === "error") {
       // The reply failed partway; say so rather than ending on silence.
       cur = { type: "text", text: ev.message || REPLY_FAILED };
@@ -793,7 +803,7 @@ export const billing = () => call<Billing>(`/api/billing`);
 // ---- Settings (account-wide, same shapes as src/shared/types.ts) ----
 // "workout" is the workout-only app: no calories, food, scale, or weigh-ins.
 export type AppMode = "full" | "workout";
-export type Settings = { mode: AppMode };
+export type Settings = { mode: AppMode; onboarded: boolean };
 export const getSettings = () => call<Settings>(`/api/settings`);
 export const updateSettings = (patch: Partial<Settings>) => call<Settings>(`/api/settings`, "PUT", patch);
 

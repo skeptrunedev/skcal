@@ -392,7 +392,6 @@ const DAY_MS = 86_400_000;
 // Opus 5.5 always thinks and its thinking counts against max_tokens, so the
 // structured-output helpers get room to think before the JSON.
 const EXTRACT_MAX_TOKENS = 4096;
-const DEFAULT_TARGETS = { goalWeightKg: 66.7, startWeightKg: 72.6, dailyKcalTarget: 1850, proteinTargetG: 160 };
 
 // ---- API keys --------------------------------------------------------------
 async function sha256hex(s: string): Promise<string> {
@@ -844,12 +843,15 @@ async function recomputeDay(c: { env: Bindings }, email: string, date: string) {
     .where(and(eq(schema.nutritionItems.userEmail, email), eq(schema.nutritionItems.date, date)));
   const kcal = items.length ? items.reduce((s, i) => s + (i.kcal ?? 0), 0) : null;
   const proteinG = items.length ? Math.round(items.reduce((s, i) => s + (i.proteinG ?? 0), 0)) : null;
+  // Against the user's own protein target; unknown until they have one.
+  const proteinTarget = (await getTargets(c, email)).proteinTargetG;
+  const hitProtein = proteinG != null && proteinTarget != null ? proteinG >= proteinTarget : null;
   await db(c)
     .insert(schema.nutritionDays)
-    .values({ userEmail: email, date, kcal, proteinG, hitProtein: proteinG != null ? proteinG >= 160 : null, adherence: null })
+    .values({ userEmail: email, date, kcal, proteinG, hitProtein, adherence: null })
     .onConflictDoUpdate({
       target: [schema.nutritionDays.userEmail, schema.nutritionDays.date],
-      set: { kcal, proteinG, hitProtein: proteinG != null ? proteinG >= 160 : null },
+      set: { kcal, proteinG, hitProtein },
     });
 }
 
@@ -1324,7 +1326,9 @@ async function getTargets(c: { env: Bindings }, email: string): Promise<Targets 
   const existing = await db(c).select().from(schema.targets).where(eq(schema.targets.userEmail, email)).limit(1);
   const t =
     existing[0] ??
-    (await db(c).insert(schema.targets).values({ userEmail: email, ...DEFAULT_TARGETS, startDate: new Date() }).returning())[0];
+    // A new account has no targets until onboarding (or the user) sets them:
+    // null, not the column defaults, so nothing shows numbers they never chose.
+    (await db(c).insert(schema.targets).values({ userEmail: email, dailyKcalTarget: null, proteinTargetG: null, startDate: new Date() }).returning())[0];
   return {
     id: t.id,
     goalWeightKg: t.goalWeightKg,
@@ -1335,6 +1339,7 @@ async function getTargets(c: { env: Bindings }, email: string): Promise<Targets 
     proteinTargetG: t.proteinTargetG,
     heightCm: t.heightCm,
     sex: t.sex,
+    birthYear: t.birthYear,
   };
 }
 
@@ -1414,11 +1419,24 @@ app.put("/api/targets", async (c) => {
 });
 
 // ---- settings: account-wide app preferences ----------------------------------
+async function getSettingsFor(c: EnvCtx, email: string): Promise<{ mode: schema.AppMode; onboarded: boolean }> {
+  const row = (await db(c).select().from(schema.userSettings).where(eq(schema.userSettings.userEmail, email)).limit(1))[0];
+  // No row = an account created after onboarding shipped that hasn't finished it.
+  return { mode: row?.mode ?? "full", onboarded: row?.onboardedAt != null };
+}
+
 async function getAppMode(c: EnvCtx, email: string): Promise<schema.AppMode> {
-  const row = (
-    await db(c).select({ mode: schema.userSettings.mode }).from(schema.userSettings).where(eq(schema.userSettings.userEmail, email)).limit(1)
-  )[0];
-  return row?.mode ?? "full";
+  return (await getSettingsFor(c, email)).mode;
+}
+
+/** Finish (or skip) first-run onboarding, optionally switching the app mode. */
+async function markOnboarded(c: EnvCtx, email: string, mode?: schema.AppMode) {
+  const now = new Date();
+  const set = { onboardedAt: now, updatedAt: now, ...(mode ? { mode } : {}) };
+  await db(c)
+    .insert(schema.userSettings)
+    .values({ userEmail: email, ...set })
+    .onConflictDoUpdate({ target: schema.userSettings.userEmail, set });
 }
 
 /**
@@ -1437,7 +1455,7 @@ async function getAppMode(c: EnvCtx, email: string): Promise<schema.AppMode> {
  *             schema:
  *               $ref: '#/components/schemas/Settings'
  */
-app.get("/api/settings", async (c) => c.json({ mode: await getAppMode(c, c.get("email")) }));
+app.get("/api/settings", async (c) => c.json(await getSettingsFor(c, c.get("email"))));
 
 /**
  * @openapi
@@ -1466,17 +1484,20 @@ app.get("/api/settings", async (c) => c.json({ mode: await getAppMode(c, c.get("
  */
 app.put("/api/settings", async (c) => {
   const email = c.get("email");
-  const b = await c.req.json<{ mode?: unknown }>().catch(() => ({}) as { mode?: unknown });
-  if (b.mode === undefined) return c.json({ mode: await getAppMode(c, email) });
-  if (!schema.APP_MODES.includes(b.mode as schema.AppMode)) {
-    return c.json({ error: `mode must be one of ${schema.APP_MODES.join(", ")}` }, 400);
+  const b = await c.req.json<{ mode?: unknown; onboarded?: unknown }>().catch(() => ({}) as { mode?: unknown; onboarded?: unknown });
+  if (b.onboarded !== undefined && b.onboarded !== true) return c.json({ error: "onboarded can only be set to true" }, 400);
+  if (b.mode !== undefined) {
+    if (!schema.APP_MODES.includes(b.mode as schema.AppMode)) {
+      return c.json({ error: `mode must be one of ${schema.APP_MODES.join(", ")}` }, 400);
+    }
+    const mode = b.mode as schema.AppMode;
+    await db(c)
+      .insert(schema.userSettings)
+      .values({ userEmail: email, mode, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: schema.userSettings.userEmail, set: { mode, updatedAt: new Date() } });
   }
-  const mode = b.mode as schema.AppMode;
-  await db(c)
-    .insert(schema.userSettings)
-    .values({ userEmail: email, mode, updatedAt: new Date() })
-    .onConflictDoUpdate({ target: schema.userSettings.userEmail, set: { mode, updatedAt: new Date() } });
-  return c.json({ mode });
+  if (b.onboarded === true) await markOnboarded(c, email);
+  return c.json(await getSettingsFor(c, email));
 });
 
 // ---- dashboard aggregate ---------------------------------------------------
@@ -2574,7 +2595,7 @@ async function buildCoachSystem(
     `- Daily calories: ${kcalTarget || "unset"} kcal`,
     `- Daily protein: ${proteinTarget || "unset"} g`,
     `- Goal weight: ${fmtLb(targets.goalWeightKg)}; start weight: ${fmtLb(targets.startWeightKg)}`,
-    `- Height: ${targets.heightCm != null ? `${(targets.heightCm / 2.54).toFixed(1)} in (${Math.round(targets.heightCm)} cm)` : "unknown"}; sex: ${targets.sex ?? "unknown"}`,
+    `- Height: ${targets.heightCm != null ? `${(targets.heightCm / 2.54).toFixed(1)} in (${Math.round(targets.heightCm)} cm)` : "unknown"}; sex: ${targets.sex ?? "unknown"}; age: ${targets.birthYear != null ? `about ${Number(today.slice(0, 4)) - targets.birthYear}` : "unknown"}`,
     "",
     "TODAY SO FAR:",
     `- Logged: ${kcalIn} kcal, ${Math.round(proteinIn)} g protein`,
@@ -2601,6 +2622,16 @@ async function buildCoachSystem(
     "When the user asks about eating a specific food: estimate its calories and protein, say how it fits the remaining budget above, then give a short blunt verdict (eat it / fine / skip). If it's a poor fit, suggest a better alternative that protects the protein floor and calorie budget.",
     "Be concise: 2–5 sentences, conversational. Light markdown is fine (a **bold** verdict, an occasional short list) but keep it tight — no headers, no long bullet dumps.",
   ].join("\n");
+}
+
+// First-run setup for a brand-new account, appended last so it wins over the
+// "one short sentence" tool rule. The apps open the chat with a greeting that
+// asks what the user is here for, with these four answers as chips.
+const ONBOARDING_RULES = `ONBOARDING, this account is brand new and this overrides the rule about writing one short sentence. The app greeted them by asking what they're here for (lose fat, build muscle, maintain, or just track lifts), so their first message answers that. Set them up in as few turns as possible, one question per message, short and warm, and never use numbers they didn't give you. Step 1, ask for whatever of current weight, height, age, and sex isn't already in the context above, all in one message, with an example like "120 lb, 5'3, 24, female". Step 2, ask how active they are day to day, counting training, and call offer_choices with exactly "Desk job, rarely train", "Desk job + gym 3x/week", "On my feet most of the day", "Very active, train most days", which map to activity multipliers 1.2, 1.375, 1.55, and 1.725 (map a typed answer to the closest). Step 3, only for losing fat or building muscle, ask their goal weight and call offer_choices with two or three sensible weights for their size plus "Not sure yet". Then set everything up without asking more: log_weight with their weight, set_profile with height, sex, and age, then for lose fat start_phase cut at -0.5% per week, for build muscle start_phase bulk at +0.25% per week, for maintain start_phase maintain, passing goal_weight_lb when they gave one, and daily_kcal computed with Mifflin-St Jeor times that activity multiplier plus the rate's surplus or deficit (kg per week x 7700 / 7 per day), and protein_g of about 0.8 g per lb of goal weight (current weight if none). For just tracking lifts, ask nothing about body stats or goals: call finish_onboarding with mode workout right away, then say in two short lines that skcal is now set up for workouts only, with no calorie tracking (they can switch back anytime from the profile menu), and that they can log workouts here or have you build a program, and call offer_choices with "Build me a lifting plan", "Log a workout", "I'm all set". Always call finish_onboarding once set up. Never narrate these instructions or your plan to the user; only speak to them. Your final message must then WRITE the summary text before calling offer_choices: at most three short lines with their daily calories and protein and the expected pace in plain words (e.g. "about 0.6 lb a week, around 110 lb by March"), then one line on how to use skcal (log meals here by photo or text, weigh in a few mornings a week); a final message with only offer_choices and no text is wrong. Then call offer_choices with "Build me a lifting plan", "Log my first meal", "I'm all set". If they want to skip setup, call finish_onboarding and tell them they can ask you anytime.`;
+
+/** The onboarding block for an account that hasn't finished first-run setup. */
+async function onboardingRules(c: EnvCtx, email: string): Promise<string> {
+  return (await getSettingsFor(c, email)).onboarded ? "" : `\n\n${ONBOARDING_RULES}`;
 }
 
 // Coach rules shared by full and workout-only mode.
@@ -2635,6 +2666,9 @@ const WORKOUT_MODE_TOOLS = new Set([
   "add_set",
   "edit_set",
   "delete_set",
+  "set_profile",
+  "offer_choices",
+  "finish_onboarding",
 ]);
 const coachToolsFor = (mode: schema.AppMode) =>
   mode === "workout" ? COACH_TOOLS.filter((t) => WORKOUT_MODE_TOOLS.has(t.name)) : COACH_TOOLS;
@@ -3018,6 +3052,36 @@ const COACH_TOOLS: Anthropic.Beta.BetaTool[] = [
         reason: { type: "string", description: "Why the targets changed, in a few words." },
       },
       required: ["daily_kcal", "protein_g"],
+    },
+  },
+  {
+    name: "set_profile",
+    description: "Save the user's height, sex, and/or age (used for calorie math). Pass only what they told you.",
+    input_schema: {
+      type: "object",
+      properties: {
+        height_in: { type: "number", description: "Height in inches (5'3\" = 63)." },
+        sex: { type: "string", enum: ["male", "female", "other"] },
+        age: { type: "integer", description: "Age in years." },
+      },
+    },
+  },
+  {
+    name: "offer_choices",
+    description:
+      "Show 2 to 4 tap-to-send quick replies under your message, phrased as the user's answer (each under 30 characters). Call it last, after writing your question. Never for questions that need a number.",
+    input_schema: {
+      type: "object",
+      properties: { options: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 4 } },
+      required: ["options"],
+    },
+  },
+  {
+    name: "finish_onboarding",
+    description: "Mark the new user's setup done. mode workout switches the app to workouts only (no calories or weigh-ins) for someone who only wants to track lifting.",
+    input_schema: {
+      type: "object",
+      properties: { mode: { type: "string", enum: ["full", "workout"], description: "App mode to switch to (default stay full)." } },
     },
   },
 
@@ -3841,6 +3905,40 @@ async function executeCoachTool(
     });
   }
 
+  if (name === "set_profile") {
+    const set: Partial<typeof schema.targets.$inferInsert> = {};
+    if (input.height_in != null) {
+      const h = Number(input.height_in);
+      if (!(h >= 36 && h <= 96)) return { error: "height_in must be 36-96" };
+      set.heightCm = inToCm(h);
+    }
+    if (input.sex != null) {
+      if (input.sex !== "male" && input.sex !== "female" && input.sex !== "other") return { error: "sex must be male, female, or other" };
+      set.sex = input.sex;
+    }
+    if (input.age != null) {
+      const age = Number(input.age);
+      if (!(Number.isInteger(age) && age >= 13 && age <= 100)) return { error: "age must be 13-100" };
+      set.birthYear = Number(today.slice(0, 4)) - age;
+    }
+    if (!Object.keys(set).length) return { error: "give height_in, sex, or age" };
+    await getTargets(c, email);
+    await db(c).update(schema.targets).set(set).where(eq(schema.targets.userEmail, email));
+    return { ok: true, saved: Object.keys(set) };
+  }
+
+  if (name === "offer_choices") {
+    const options = (Array.isArray(input.options) ? input.options : []).map((o) => String(o).trim().slice(0, 40)).filter(Boolean).slice(0, 4);
+    if (options.length < 2) return { error: "give 2-4 options" };
+    return { ok: true, shown: options };
+  }
+
+  if (name === "finish_onboarding") {
+    const mode = input.mode === "workout" || input.mode === "full" ? input.mode : undefined;
+    await markOnboarded(c, email, mode);
+    return { ok: true, mode: mode ?? (await getAppMode(c, email)) };
+  }
+
   if (name === "delete_reminder") {
     const id = String(input.id ?? "").trim();
     if (!id) return { error: "id required" };
@@ -3902,7 +4000,7 @@ app.post("/api/agent", async (c) => {
 
   const tzMin = Number(b.tz ?? 0) || 0;
   const today = c.req.query("date") ?? new Date(Date.now() - tzMin * 60_000).toISOString().slice(0, 10);
-  const system = await buildCoachSystem(c, email, today, tzMin, await getAppMode(c, email));
+  const system = (await buildCoachSystem(c, email, today, tzMin, await getAppMode(c, email))) + (await onboardingRules(c, email));
 
   let reply: string;
   try {
@@ -3950,7 +4048,8 @@ app.post("/api/agent/stream", async (c) => {
     (await buildCoachSystem(c, email, today, tzMin, mode)) +
     (mode === "workout"
       ? `\n\nLOGGING JUDGMENT, log immediately when the user states a workout they did, calling the log tool straight away; after logging, reply in one or two short sentences saying what you logged, and add advice only if the user asked for it. When the user sends a PHOTO of a workout screenshot or whiteboard, log it with log_workout. Tools: log workouts from the user's plain description with log_workout (pass their words through); for questions about their past training that no tool covers (volume, streaks, PRs, trends), write a read-only query with query_user_data rather than guessing; save durable user preferences/facts with remember and remove wrong ones with forget_memory. ${COACH_TRAINING_RULES} When the user states a lasting preference (hates lunges, bad shoulder, trains at home), SAVE it, and never program around saved memories. ${COACH_REMINDER_RULES} Today's date is ${today}. IMPORTANT: while calling tools, do NOT write any prose, just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed. Never repeat that confirmation.`
-      : `\n\nLOGGING JUDGMENT, log immediately when the user states something that happened (a meal eaten, a weigh-in, a workout done), calling the log tool straight away without first checking the log; after logging, reply in one or two short sentences, what you logged with its kcal and protein, then today's total and what's left, and add advice only if the user asked for it; when the conversation is exploratory ("should I eat", "what if", "how many calories are in"), answer first and ask before logging. When the user sends a PHOTO, look at it, food -> describe what you see and log it with log_meal, scale readout -> log_weight, workout screenshot -> log_workout, tape measure -> log_measurement. Tools: you can log meals with log_meal; view and reorganize the food log with list_food_log, move_meal, and move_food_item; clean up mistakes and duplicates with delete_meal and delete_food_item, and when the user corrects an entry ("that was actually 600 kcal", "it was two scoops") fix it in place with edit_food_item instead of deleting and relogging; record body measurements with log_measurement (inches); record weigh-ins with log_weight (pounds); answer questions about weight history (first weigh-in, lb lost per week, what they weighed on a date) with get_weight_history instead of guessing from the summary above; for any other question about their past data that no tool covers (averages, streaks, trends across meals, workouts or measurements), write a read-only query with query_user_data rather than guessing; log workouts from the user's plain description with log_workout (pass their words through); save durable user preferences/facts with remember and remove wrong ones with forget_memory; update daily calorie and protein targets with set_targets. When the user describes their day to day activity, a new job, a change in training volume, or a big lifestyle change, recompute their daily calorie target with Mifflin-St Jeor from the height, sex, and latest weigh-in in the context above, scaled by the closest activity multiplier, 1.2 sedentary, 1.375 lightly active, 1.55 moderately active, 1.725 very active, 1.9 athlete, then apply the deficit or surplus their current goal implies, state the new daily calorie and protein numbers plainly, and call set_targets with them, passing their activity in a few words. GOAL PHASES, when the user starts a bulk, cut, or maintenance block ("starting a lean bulk", "time to cut till March"), call start_phase (it closes the open phase and writes the targets); typical rates are a bulk at +0.25 to +0.5% bodyweight per week and a cut at -0.5 to -1% per week, so pick from those unless they give one. If the result's kcalSource is unchanged there wasn't enough logged data to estimate maintenance, so compute it with Mifflin-St Jeor as below, add the rate's surplus or deficit (kg per week x 7700 / 7 kcal per day), and call update_phase with daily_kcal. Adjust a phase with update_phase and close it with end_phase; answer "am I gaining too fast" from the GOAL PHASE line or get_phases. ${COACH_TRAINING_RULES} When the user states a lasting preference (dislikes yogurt, vegetarian, allergic to nuts), SAVE it — and never suggest foods that conflict with saved memories. ${COACH_REMINDER_RULES} Today's date is ${today}. To move / re-date / fix which day food was logged on, first call list_food_log for the relevant day to find the exact meal or item, then move it. IMPORTANT: while calling tools, do NOT write any prose — just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed (item + from day → to day). Never repeat that confirmation.`);
+      : `\n\nLOGGING JUDGMENT, log immediately when the user states something that happened (a meal eaten, a weigh-in, a workout done), calling the log tool straight away without first checking the log; after logging, reply in one or two short sentences, what you logged with its kcal and protein, then today's total and what's left, and add advice only if the user asked for it; when the conversation is exploratory ("should I eat", "what if", "how many calories are in"), answer first and ask before logging. When the user sends a PHOTO, look at it, food -> describe what you see and log it with log_meal, scale readout -> log_weight, workout screenshot -> log_workout, tape measure -> log_measurement. Tools: you can log meals with log_meal; view and reorganize the food log with list_food_log, move_meal, and move_food_item; clean up mistakes and duplicates with delete_meal and delete_food_item, and when the user corrects an entry ("that was actually 600 kcal", "it was two scoops") fix it in place with edit_food_item instead of deleting and relogging; record body measurements with log_measurement (inches); record weigh-ins with log_weight (pounds); answer questions about weight history (first weigh-in, lb lost per week, what they weighed on a date) with get_weight_history instead of guessing from the summary above; for any other question about their past data that no tool covers (averages, streaks, trends across meals, workouts or measurements), write a read-only query with query_user_data rather than guessing; log workouts from the user's plain description with log_workout (pass their words through); save durable user preferences/facts with remember and remove wrong ones with forget_memory; update daily calorie and protein targets with set_targets. When the user describes their day to day activity, a new job, a change in training volume, or a big lifestyle change, recompute their daily calorie target with Mifflin-St Jeor from the height, sex, and latest weigh-in in the context above, scaled by the closest activity multiplier, 1.2 sedentary, 1.375 lightly active, 1.55 moderately active, 1.725 very active, 1.9 athlete, then apply the deficit or surplus their current goal implies, state the new daily calorie and protein numbers plainly, and call set_targets with them, passing their activity in a few words. GOAL PHASES, when the user starts a bulk, cut, or maintenance block ("starting a lean bulk", "time to cut till March"), call start_phase (it closes the open phase and writes the targets); typical rates are a bulk at +0.25 to +0.5% bodyweight per week and a cut at -0.5 to -1% per week, so pick from those unless they give one. If the result's kcalSource is unchanged there wasn't enough logged data to estimate maintenance, so compute it with Mifflin-St Jeor as below, add the rate's surplus or deficit (kg per week x 7700 / 7 kcal per day), and call update_phase with daily_kcal. Adjust a phase with update_phase and close it with end_phase; answer "am I gaining too fast" from the GOAL PHASE line or get_phases. ${COACH_TRAINING_RULES} When the user states a lasting preference (dislikes yogurt, vegetarian, allergic to nuts), SAVE it — and never suggest foods that conflict with saved memories. ${COACH_REMINDER_RULES} Today's date is ${today}. To move / re-date / fix which day food was logged on, first call list_food_log for the relevant day to find the exact meal or item, then move it. IMPORTANT: while calling tools, do NOT write any prose — just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed (item + from day → to day). Never repeat that confirmation.`) +
+    (await onboardingRules(c, email));
 
   const encoder = new TextEncoder();
   // NDJSON event protocol so the client renders tool calls as real parts rather
@@ -3962,6 +4061,9 @@ app.post("/api/agent/stream", async (c) => {
   const convo: Anthropic.Beta.BetaMessageParam[] = messages.map((m) => ({ role: m.role, content: coachContent(m) }));
   // Text of each model turn, saved as the reply when the stream ends.
   const replyTurns: string[] = [];
+  // Quick replies the model offered (offer_choices): sent once the reply is
+  // complete, so they always sit under its final text.
+  let choices: string[] | null = null;
   // The client going away (tab closed, stop pressed) cancels the stream: stop
   // the model, but still save what was said so far.
   let cancelled = false;
@@ -3992,7 +4094,8 @@ app.post("/api/agent/stream", async (c) => {
                   send({ t: "text", v: event.delta.text });
                 } else if (event.type === "content_block_start" && event.content_block.type === "tool_use") {
                   sentAny = true;
-                  send({ t: "tool", id: event.content_block.id, name: event.content_block.name });
+                  // Quick replies render as chips under the reply, not as a tool call.
+                  if (event.content_block.name !== "offer_choices") send({ t: "tool", id: event.content_block.id, name: event.content_block.name });
                 }
               }
             } catch (e) {
@@ -4016,11 +4119,23 @@ app.post("/api/agent/stream", async (c) => {
             if (toolUses.length === 0) break;
             convo.push({ role: "assistant", content: final.content });
             const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
+            const wroteText = replyTurns.some((t) => t.trim());
             for (const tu of toolUses) {
-              const out = await executeCoachTool(c, email, tu.name, tu.input as Record<string, unknown>, today, tzMin);
-              send({ t: "result", id: tu.id, result: out });
+              let out = await executeCoachTool(c, email, tu.name, tu.input as Record<string, unknown>, today, tzMin);
+              if (tu.name === "offer_choices") {
+                const shown = (out as { shown?: string[] }).shown;
+                if (shown) {
+                  choices = shown;
+                  // Offered before saying anything: the chips need a message above them.
+                  if (!wroteText) out = { ok: true, note: "These choices will show under your reply, but you haven't written anything yet, so the user would see buttons with nothing above them. Now write the full message your instructions call for at this point (after onboarding setup, that's the summary of their daily calories, protein, and pace), not a pointer to the buttons." };
+                }
+              } else {
+                send({ t: "result", id: tu.id, result: out });
+              }
               results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out) });
             }
+            // Offering choices after writing ends the turn: the user answers by tapping one.
+            if (wroteText && toolUses.every((tu) => tu.name === "offer_choices")) break;
             convo.push({ role: "user", content: results });
           }
         } catch (e) {
@@ -4035,6 +4150,7 @@ app.post("/api/agent/stream", async (c) => {
           }
         }
         if (cancelled) return;
+        if (choices && !failure) send({ t: "choices", options: choices });
         if (failure) {
           // The response is already a 200, so a failure partway through goes out
           // as an event; the client shows it instead of waiting on a reply.
@@ -5433,6 +5549,8 @@ app.post("/api/onboard/goal", async (c) => {
   if (kcal >= 800 && kcal <= 6000) set.dailyKcalTarget = Math.round(kcal);
   const protein = Number(b.proteinG);
   if (protein >= 30 && protein <= 400) set.proteinTargetG = Math.round(protein);
+  // The iMessage interview is this account's onboarding: the apps skip theirs.
+  await markOnboarded(c, email);
   if (Object.keys(set).length) {
     await db(c)
       .insert(schema.targets)
@@ -6296,6 +6414,11 @@ function buildMcpServer(c: Context<{ Bindings: Bindings; Variables: Variables }>
   const muscle = z.enum(MUSCLES.map((m) => m.key) as [string, ...string[]]);
   const dayArg = z.string().optional().describe("YYYY-MM-DD or 'today'.");
 
+  coachTool("set_profile", false, "Save body profile", "Save the user's height, sex, and/or age, used for calorie math. Pass only what they gave.", {
+    height_in: z.number().min(36).max(96).optional().describe("Height in inches."),
+    sex: z.enum(["male", "female", "other"]).optional(),
+    age: z.number().int().min(13).max(100).optional().describe("Age in years."),
+  });
   coachTool("get_phases", true, "Goal phases", "Get the user's bulk / cut / maintenance phases with planned vs actual weekly rate, and maintenance calories estimated from their own logs.", {});
   coachTool(
     "start_phase",
@@ -6574,8 +6697,8 @@ async function reminderContext(c: EnvCtx, r: typeof schema.reminders.$inferSelec
   const targets = (
     await db(c).select().from(schema.targets).where(eq(schema.targets.userEmail, email)).limit(1)
   )[0];
-  const kcalTarget = targets?.dailyKcalTarget ?? DEFAULT_TARGETS.dailyKcalTarget;
-  const proteinTarget = targets?.proteinTargetG ?? DEFAULT_TARGETS.proteinTargetG;
+  const kcalTarget = targets?.dailyKcalTarget ?? null;
+  const proteinTarget = targets?.proteinTargetG ?? null;
   const nut = (
     await db(c)
       .select()
@@ -6629,8 +6752,8 @@ async function reminderContext(c: EnvCtx, r: typeof schema.reminders.$inferSelec
     `This reminder last actually sent: ${r.lastSentAt ? localTimeLineInTz(r.tz, new Date(r.lastSentAt)) : "never"}`,
     "",
     `USER'S DAY SO FAR (${day}):`,
-    `- Calories logged: ${kcalIn} of ${kcalTarget} kcal target (${kcalTarget - kcalIn} left)`,
-    `- Protein logged: ${Math.round(proteinIn)} of ${proteinTarget} g target`,
+    kcalTarget != null ? `- Calories logged: ${kcalIn} of ${kcalTarget} kcal target (${kcalTarget - kcalIn} left)` : `- Calories logged: ${kcalIn} kcal (no target set)`,
+    proteinTarget != null ? `- Protein logged: ${Math.round(proteinIn)} of ${proteinTarget} g target` : `- Protein logged: ${Math.round(proteinIn)} g (no target set)`,
     mealLines.length ? `- Meals logged today:\n${mealLines.join("\n")}` : "- Meals logged today: none yet",
     workoutRows.length
       ? `- Workouts today: ${workoutRows.map((w) => w.summary).join("; ")}`

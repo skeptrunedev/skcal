@@ -2006,6 +2006,38 @@ a {
   .thinking-dots span { animation: none; opacity: 0.6; }
 }
 /* Coach tool-call chip (assistant-ui tool part) */
+/* the agent's tap-to-send quick replies (offer_choices) */
+.quick-replies {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+.quick-reply {
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--input-bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+.quick-reply:hover {
+  background: var(--surface-2);
+}
+.quick-skip {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  padding: 0.45rem 0.3rem;
+  cursor: pointer;
+}
+
 .tool-chip {
   display: inline-flex;
   align-items: center;

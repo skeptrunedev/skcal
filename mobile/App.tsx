@@ -92,6 +92,9 @@ function Shell() {
   // food, the scale, and weigh-ins out of every screen.
   const [mode, setMode] = useState<AppMode>("full");
   const workoutOnly = mode === "workout";
+  // False for a new account: the app opens on the agent's setup interview.
+  // Null until settings load.
+  const [onboarded, setOnboarded] = useState<boolean | null>(null);
   // Today's latest dashboard (picks the add sheet's first tab) and a counter
   // that tells Today to refetch after the add sheet logs something.
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -146,7 +149,13 @@ function Shell() {
     whoami().then((w) => setEmail(w.email)).catch(() => {});
     profileImage().then(setAvatarImage).catch(() => {});
     fetchBilling().then(setBilling).catch(() => {});
-    getSettings().then((st) => setMode(st.mode)).catch(() => {});
+    getSettings()
+      .then((st) => {
+        setMode(st.mode);
+        setOnboarded(st.onboarded);
+        if (!st.onboarded) setView("coach");
+      })
+      .catch(() => {});
     loadConversations();
   }, [authed, loadConversations]);
 
@@ -187,6 +196,7 @@ function Shell() {
     setAvatarImage(null);
     setBilling(null);
     setMode("full");
+    setOnboarded(null);
     setDashboard(null);
     setConversations([]);
     setSession({ key: "new-0", convId: null, messages: [] });
@@ -273,9 +283,23 @@ function Shell() {
     loadConversations();
   };
   // First turn persisted server-side: adopt the id and refresh the list.
+  // During setup, re-read settings: the agent finishes onboarding (and may
+  // switch the app to workouts only) from inside the conversation.
   const onPersisted = (id: string) => {
     setSession((s) => (s.convId ? s : { ...s, convId: id }));
     loadConversations();
+    if (onboarded === false)
+      getSettings()
+        .then((st) => {
+          setMode(st.mode);
+          setOnboarded(st.onboarded);
+        })
+        .catch(() => {});
+  };
+  const skipOnboarding = () => {
+    setOnboarded(true);
+    setView("today");
+    updateSettings({ onboarded: true }).catch(() => {});
   };
 
   // Light content on the dark theme, dark content on the light one.
@@ -349,6 +373,8 @@ function Shell() {
             initialConversationId={session.convId}
             onPersisted={onPersisted}
             workoutOnly={workoutOnly}
+            onboarding={onboarded === false}
+            onSkipOnboarding={skipOnboarding}
           />
         )}
       </KeyboardAvoidingView>

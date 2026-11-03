@@ -126,20 +126,19 @@ describe("nutrition", () => {
 });
 
 describe("targets", () => {
-  it("GET returns defaults on first read", async () => {
+  it("GET starts a new account with no goals, not someone else's numbers", async () => {
     const res = await asUser("targets-user@example.com", "/api/targets");
     expect(res.status).toBe(200);
-    const t = (await res.json()) as {
-      id: number;
-      goalWeightKg: number;
-      startWeightKg: number;
-      dailyKcalTarget: number;
-      proteinTargetG: number;
-    };
-    expect(t.goalWeightKg).toBe(66.7);
-    expect(t.startWeightKg).toBe(72.6);
-    expect(t.dailyKcalTarget).toBe(1850);
-    expect(t.proteinTargetG).toBe(160);
+    const t = (await res.json()) as Record<string, unknown>;
+    expect(t).toMatchObject({
+      goalWeightKg: null,
+      startWeightKg: null,
+      dailyKcalTarget: null,
+      proteinTargetG: null,
+      heightCm: null,
+      sex: null,
+      birthYear: null,
+    });
     expect(typeof t.id).toBe("number");
   });
 });
@@ -148,20 +147,32 @@ describe("settings", () => {
   it("GET defaults to the full app", async () => {
     const res = await asUser("settings-default@example.com", "/api/settings");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ mode: "full" });
+    expect(await res.json()).toMatchObject({ mode: "full" });
   });
 
   it("PUT switches to workout-only, persists, and switches back", async () => {
     const who = "settings-mode@example.com";
     const put = await jsonPost(who, "/api/settings", { mode: "workout" }, "PUT");
     expect(put.status).toBe(200);
-    expect(await put.json()).toEqual({ mode: "workout" });
-    expect(await (await asUser(who, "/api/settings")).json()).toEqual({ mode: "workout" });
+    expect(await put.json()).toMatchObject({ mode: "workout" });
+    expect(await (await asUser(who, "/api/settings")).json()).toMatchObject({ mode: "workout" });
     // Another account is unaffected.
-    expect(await (await asUser("settings-other@example.com", "/api/settings")).json()).toEqual({ mode: "full" });
+    expect(await (await asUser("settings-other@example.com", "/api/settings")).json()).toMatchObject({ mode: "full" });
 
     await jsonPost(who, "/api/settings", { mode: "full" }, "PUT");
-    expect(await (await asUser(who, "/api/settings")).json()).toEqual({ mode: "full" });
+    expect(await (await asUser(who, "/api/settings")).json()).toMatchObject({ mode: "full" });
+  });
+
+  it("a new account starts un-onboarded; finishing setup sticks", async () => {
+    const who = "settings-onboard@example.com";
+    expect(await (await asUser(who, "/api/settings")).json()).toEqual({ mode: "full", onboarded: false });
+    const put = await jsonPost(who, "/api/settings", { onboarded: true }, "PUT");
+    expect(put.status).toBe(200);
+    expect(await put.json()).toEqual({ mode: "full", onboarded: true });
+    // Changing the mode later keeps it onboarded.
+    await jsonPost(who, "/api/settings", { mode: "workout" }, "PUT");
+    expect(await (await asUser(who, "/api/settings")).json()).toEqual({ mode: "workout", onboarded: true });
+    expect((await jsonPost(who, "/api/settings", { onboarded: false }, "PUT")).status).toBe(400);
   });
 
   it("PUT with an unknown mode → 400 and leaves the mode alone", async () => {
@@ -169,7 +180,7 @@ describe("settings", () => {
     await jsonPost(who, "/api/settings", { mode: "workout" }, "PUT");
     const res = await jsonPost(who, "/api/settings", { mode: "calories" }, "PUT");
     expect(res.status).toBe(400);
-    expect(await (await asUser(who, "/api/settings")).json()).toEqual({ mode: "workout" });
+    expect(await (await asUser(who, "/api/settings")).json()).toMatchObject({ mode: "workout" });
   });
 });
 

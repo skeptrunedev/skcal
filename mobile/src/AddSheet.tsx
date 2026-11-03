@@ -68,6 +68,7 @@ export function AddSheet({
       open={open}
       onClose={onClose}
       onSave={tab === "nutrition" ? undefined : save}
+      saveDisabled={tab === "weight" ? !lb.trim() : tab === "measure" ? !inches.trim() : false}
       saving={busy}
       error={tab === "nutrition" ? null : err}
       cancelLabel={tab === "nutrition" ? "Done" : "Cancel"}
@@ -91,8 +92,8 @@ export function AddSheet({
 
       {tab === "weight" && (
         <>
-          <Field label="WEIGHT (LB)" value={lb} onChangeText={setLb} keyboardType="decimal-pad" placeholder="160.0" />
-          <Field label="BODY FAT % (OPTIONAL, NOISY)" value={bf} onChangeText={setBf} keyboardType="decimal-pad" placeholder="20" />
+          <Field label="WEIGHT (LB)" value={lb} onChangeText={setLb} keyboardType="decimal-pad" placeholder="lb" autoFocus />
+          <Field label="BODY FAT % (OPTIONAL, NOISY)" value={bf} onChangeText={setBf} keyboardType="decimal-pad" placeholder="optional" />
           <Field label="NOTE (OPTIONAL)" value={note} onChangeText={setNote} placeholder="post-workout, dehydrated, …" maxLength={500} />
         </>
       )}
@@ -103,7 +104,7 @@ export function AddSheet({
             <Text style={s.fieldLabel}>SITE</Text>
             <Select value={site} options={SITE_OPTIONS} onChange={setSite} label="Measurement site" />
           </View>
-          <Field label="MEASUREMENT (IN)" value={inches} onChangeText={setInches} keyboardType="decimal-pad" placeholder="15.0" />
+          <Field label="MEASUREMENT (IN)" value={inches} onChangeText={setInches} keyboardType="decimal-pad" placeholder="in" />
         </>
       )}
 

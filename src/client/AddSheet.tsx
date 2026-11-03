@@ -65,11 +65,11 @@ export function AddSheet({
           <div className="form">
             <label className="field">
               <span>Weight (lb)</span>
-              <input inputMode="decimal" value={lb} onChange={(e) => setLb(e.target.value)} placeholder="160.0" />
+              <input inputMode="decimal" value={lb} onChange={(e) => setLb(e.target.value)} placeholder="lb" />
             </label>
             <label className="field">
               <span>Body fat % (optional, noisy)</span>
-              <input inputMode="decimal" value={bf} onChange={(e) => setBf(e.target.value)} placeholder="20" />
+              <input inputMode="decimal" value={bf} onChange={(e) => setBf(e.target.value)} placeholder="optional" />
             </label>
             <label className="field">
               <span>Note (optional)</span>
@@ -91,7 +91,7 @@ export function AddSheet({
             </div>
             <label className="field">
               <span>Measurement (in)</span>
-              <input inputMode="decimal" value={inches} onChange={(e) => setInches(e.target.value)} placeholder="15.0" />
+              <input inputMode="decimal" value={inches} onChange={(e) => setInches(e.target.value)} placeholder="in" />
             </label>
           </div>
         )}
@@ -110,7 +110,7 @@ export function AddSheet({
               <button className="btn ghost" onClick={onClose} disabled={busy}>
                 Cancel
               </button>
-              <button className="btn" onClick={save} disabled={busy}>
+              <button className="btn" onClick={save} disabled={busy || (tab === "weight" ? !lb.trim() : !inches.trim())}>
                 {busy ? "Saving…" : "Save"}
               </button>
             </>

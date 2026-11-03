@@ -130,9 +130,22 @@ export default function App() {
   // Account-wide app mode (shared with the iOS and Android apps). "workout"
   // strips calories, food, the scale, and weigh-ins out of every screen.
   const [mode, setMode] = useState<AppMode>("full");
+  // False for a new account: the app opens on the agent's setup interview.
+  // Null until settings load.
+  const [onboarded, setOnboarded] = useState<boolean | null>(null);
   useEffect(() => {
     if (!email) return;
-    api.settings().then((s) => setMode(s.mode)).catch(() => {});
+    api
+      .settings()
+      .then((s) => {
+        setMode(s.mode);
+        setOnboarded(s.onboarded);
+        if (!s.onboarded) {
+          setView("coach");
+          history.replaceState({ view: "coach", scroll: 0 } satisfies HistoryState, "", viewPath("coach"));
+        }
+      })
+      .catch(() => {});
   }, [email]);
   // Optimistic: flip the UI now, adopt what the server stored, and fall back
   // to the previous mode if the save fails.
@@ -184,6 +197,8 @@ export default function App() {
   }, [coach.newChat, pushConvUrl]);
   // First turn persisted: the session gained an id — reflect it in the URL
   // without adding a history entry mid-conversation.
+  // During setup, also re-read settings: the agent finishes onboarding (and
+  // may switch to workouts only) from inside the conversation.
   const onPersisted = useCallback(
     (id: string) => {
       coach.onPersisted(id);
@@ -191,8 +206,16 @@ export default function App() {
         urlConvIdRef.current = id;
         history.replaceState(history.state, "", viewPath("coach", id));
       }
+      if (onboarded === false)
+        api
+          .settings()
+          .then((s) => {
+            setMode(s.mode);
+            setOnboarded(s.onboarded);
+          })
+          .catch(() => {});
     },
-    [coach.onPersisted],
+    [coach.onPersisted, onboarded],
   );
   const removeConversation = useCallback(
     async (id: string) => {
@@ -245,6 +268,12 @@ export default function App() {
     },
     [swapView],
   );
+
+  const skipOnboarding = useCallback(() => {
+    setOnboarded(true);
+    navigate("today");
+    api.updateSettings({ onboarded: true }).catch(() => {});
+  }, [navigate]);
 
   // Back/Forward: swap to the entry's view and restore its saved scroll.
   useEffect(() => {
@@ -438,6 +467,8 @@ export default function App() {
               initialConversationId={coach.session.convId}
               onPersisted={onPersisted}
               workoutOnly={workoutOnly}
+              onboarding={onboarded === false}
+              onSkipOnboarding={skipOnboarding}
             />
           )}
         </main>

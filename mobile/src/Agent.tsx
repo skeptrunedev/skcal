@@ -43,6 +43,24 @@ function toHistory(messages: ThreadMessage[]): ChatMessage[] {
     .filter((m) => (typeof m.content === "string" ? m.content.trim().length > 0 : m.content.length > 0));
 }
 
+// First-run setup: the agent interviews a new account, opening with this
+// question and its answers as chips (the worker's ONBOARDING_RULES expect it).
+const ONBOARDING_GREETING: ThreadMessage = {
+  role: "assistant",
+  content: [
+    { type: "text", text: "Hey, I'm your skcal coach. I'll set up your calories and plan in about a minute. What are you here for?" },
+    { type: "choices", options: ["Lose fat", "Build muscle", "Maintain my weight", "Just track my lifts"] },
+  ],
+};
+
+/** The quick replies to show: the latest reply's, once it has finished. */
+function openChoices(messages: ThreadMessage[], busy: boolean): string[] {
+  const last = messages[messages.length - 1];
+  if (busy || last?.role !== "assistant") return [];
+  const end = partsOf(last).at(-1);
+  return end?.type === "choices" ? end.options : [];
+}
+
 // Same copy as the web thread when the request itself can't go out.
 const SEND_FAILED = "That message didn't go through, give it another try in a moment.";
 
@@ -66,6 +84,30 @@ const TOOL_LABELS: Record<string, string> = {
   update_reminder: "Updating reminder",
   list_reminders: "Reading reminders",
   delete_reminder: "Deleting reminder",
+  set_profile: "Saving your profile",
+  finish_onboarding: "Finishing setup",
+  get_phases: "Reading your plan",
+  start_phase: "Starting your plan",
+  update_phase: "Updating your plan",
+  end_phase: "Ending your plan",
+  list_exercises: "Browsing exercises",
+  create_mesocycle: "Building your program",
+  get_training_session: "Reading your workout",
+  log_sets: "Logging sets",
+  set_muscle_feedback: "Saving feedback",
+  complete_session: "Finishing workout",
+  swap_exercise: "Swapping exercise",
+  end_mesocycle: "Ending program",
+  update_mesocycle: "Updating program",
+  delete_mesocycle: "Deleting program",
+  add_training_day: "Adding a workout",
+  update_training_day: "Updating workout",
+  delete_training_day: "Deleting workout",
+  add_day_exercise: "Adding exercise",
+  remove_day_exercise: "Removing exercise",
+  add_set: "Adding a set",
+  edit_set: "Fixing set",
+  delete_set: "Deleting set",
 };
 
 // RNW has no native animated module; the JS driver runs the same animation.
@@ -208,7 +250,8 @@ function Message({ item, running }: { item: ThreadMessage; running: boolean }) {
         const afterTool = parts[i - 1]?.type === "tool";
         if (p.type === "tool") return <ToolChip key={i} name={p.name} done={p.done} />;
         if (p.type === "image") return <Photo key={i} image={p.image} />;
-        if (!p.text) return null;
+        // Quick replies render above the composer (see openChoices).
+        if (p.type === "choices" || !p.text) return null;
         // assistant replies render markdown (bold, lists, links, code) so the
         // raw ** and #'s from the model don't leak through
         return (
@@ -242,13 +285,20 @@ export function Agent({
   initialConversationId,
   onPersisted,
   workoutOnly,
+  onboarding = false,
+  onSkipOnboarding,
 }: {
   initialMessages: ChatMessage[];
   initialConversationId: string | null;
   onPersisted: (id: string) => void;
   workoutOnly: boolean;
+  /** A new account: open on the setup interview instead of an empty chat. */
+  onboarding?: boolean;
+  onSkipOnboarding?: () => void;
 }) {
-  const [messages, setMessages] = useState<ThreadMessage[]>(initialMessages);
+  const [messages, setMessages] = useState<ThreadMessage[]>(
+    onboarding && !initialMessages.length ? [ONBOARDING_GREETING] : initialMessages,
+  );
   const [input, setInput] = useState("");
   const [pending, setPending] = useState<string[]>([]); // data URLs awaiting send
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -277,19 +327,24 @@ export function Agent({
   };
 
   const canSend = (input.trim().length > 0 || pending.length > 0) && !busy;
+  const choices = openChoices(messages, busy);
+  const started = messages.some((m) => m.role === "user");
 
-  const send = async () => {
-    if (!canSend) return;
-    const text = input.trim();
-    const photos = pending;
+  // Sends the composer's text and photos, or a tapped quick reply.
+  const send = async (quick?: string) => {
+    if (quick === undefined ? !canSend : busy) return;
+    const text = quick ?? input.trim();
+    const photos = quick === undefined ? pending : [];
     const content: string | ChatPart[] = photos.length
       ? [...(text ? [{ type: "text" as const, text }] : []), ...photos.map((image) => ({ type: "image" as const, image }))]
       : text;
     const next: ThreadMessage[] = [...messages, { role: "user", content }];
     const reply = (parts: ThreadPart[]) => setMessages([...next, { role: "assistant", content: parts }]);
     reply([]); // the live reply: Thinking until the first part arrives
-    setInput("");
-    setPending([]);
+    if (quick === undefined) {
+      setInput("");
+      setPending([]);
+    }
     setBusy(true);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -338,6 +393,26 @@ export function Agent({
           send/stop bottom-right. Typing and attaching stay open while the
           coach replies; only sending waits. */}
       <View style={[s.composerWrap, { paddingBottom: 6.4 + insets.bottom }]}>
+        {(choices.length > 0 || (onboarding && !started && onSkipOnboarding)) && (
+          <View style={s.replies}>
+            {choices.map((o) => (
+              <Pressable
+                key={o}
+                style={({ pressed }) => [s.replyChip, pressed && s.pressed]}
+                onPress={() => send(o)}
+                accessibilityRole="button"
+                accessibilityLabel={`Reply: ${o}`}
+              >
+                <Text style={s.replyChipText}>{o}</Text>
+              </Pressable>
+            ))}
+            {onboarding && !started && onSkipOnboarding && (
+              <Pressable style={s.skip} onPress={onSkipOnboarding} accessibilityRole="button" hitSlop={8}>
+                <Text style={s.skipText}>Skip setup</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
         <View style={[s.composer, focused && s.composerFocused]}>
           {pending.length > 0 && (
             <View style={s.chips}>
@@ -387,7 +462,7 @@ export function Agent({
             ) : (
               <Pressable
                 style={({ pressed }) => [s.send, !canSend && s.sendDisabled, pressed && canSend && s.pressed]}
-                onPress={send}
+                onPress={() => send()}
                 disabled={!canSend}
                 accessibilityRole="button"
                 accessibilityLabel="Send"
@@ -465,6 +540,14 @@ const useS = makeStyles((C: Palette) =>
   toolChipText: { color: C.muted, fontFamily: MONO, fontSize: 11.5, letterSpacing: 0.23 },
   toolChipTextDone: { color: C.fg },
   composerWrap: { paddingHorizontal: 16, paddingTop: 9.6, backgroundColor: C.bg },
+  replies: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, paddingBottom: 10 },
+  replyChip: {
+    borderWidth: 1, borderColor: C.amberText, borderRadius: 999,
+    paddingHorizontal: 14, paddingVertical: 8, backgroundColor: C.field,
+  },
+  replyChipText: { color: C.fg, fontSize: 14.4 },
+  skip: { paddingHorizontal: 6, paddingVertical: 8 },
+  skipText: { color: C.muted, fontSize: 13.6, textDecorationLine: "underline" },
   composer: {
     borderWidth: 1, borderColor: C.line, borderRadius: 22, backgroundColor: C.field,
     paddingHorizontal: 7.2, paddingTop: 7.2, paddingBottom: 6.4, gap: 2.4,

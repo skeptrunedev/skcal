@@ -211,8 +211,8 @@ function WeightSheet({ open, onClose, onSaved }: { open: boolean; onClose: () =>
 
   return (
     <Sheet open={open} title="Log a weigh-in" onClose={close} onSave={save} saving={saving} error={error}>
-      <Field label="WEIGHT (LB)" value={lb} onChangeText={setLb} keyboardType="decimal-pad" placeholder="160.0" autoFocus />
-      <Field label="BODY FAT % (OPTIONAL, NOISY)" value={bf} onChangeText={setBf} keyboardType="decimal-pad" placeholder="20" />
+      <Field label="WEIGHT (LB)" value={lb} onChangeText={setLb} keyboardType="decimal-pad" placeholder="lb" autoFocus />
+      <Field label="BODY FAT % (OPTIONAL, NOISY)" value={bf} onChangeText={setBf} keyboardType="decimal-pad" placeholder="optional" />
       <Field label="NOTE (OPTIONAL)" value={note} onChangeText={setNote} placeholder="post-workout, dehydrated, …" maxLength={500} />
     </Sheet>
   );
@@ -262,7 +262,7 @@ function MeasureSheet({ open, onClose, onSaved }: { open: boolean; onClose: () =
           </Pressable>
         ))}
       </View>
-      <Field label="MEASUREMENT (IN)" value={inches} onChangeText={setInches} keyboardType="decimal-pad" placeholder="15.0" />
+      <Field label="MEASUREMENT (IN)" value={inches} onChangeText={setInches} keyboardType="decimal-pad" placeholder="in" />
     </Sheet>
   );
 }
