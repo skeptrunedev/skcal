@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays, Check, MoreVertical, Plus, X } from "lucide-react";
-import type { FeedbackScales, MesoDetail, MesoSummary, MuscleFeedback, TrainingLibrary, TrainingSession, TrainingSet } from "../shared/types";
+import type { FeedbackScales, MesoDetail, MesoSummary, SessionFeedback, TrainingLibrary, TrainingSession, TrainingSet } from "../shared/types";
 import { api, todayLocal, type MesoPlanDay } from "./api";
 import { Select } from "./Select";
 
@@ -112,8 +112,9 @@ function SessionView({
   onDone: () => void;
 }) {
   const [calOpen, setCalOpen] = useState(false);
-  // An open feedback question; `then` resumes the set log that triggered it.
-  const [ask, setAsk] = useState<{ muscle: string; when: "before" | "after"; then?: () => void } | null>(null);
+  // The muscle being rated from an exercise's menu. Feedback is opt-in: logging
+  // a set never interrupts with questions.
+  const [ask, setAsk] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const s = session;
@@ -122,24 +123,6 @@ function SessionView({
   const open = async (week: number, day: number) => {
     setCalOpen(false);
     onSession(await api.session(s.meso.id, week, day));
-  };
-
-  // RP asks how a muscle recovered right before its first set (once it has
-  // been trained before), and how the work went after its last set.
-  const afterLog = (next: TrainingSession, muscle: string) => {
-    const fb = next.feedback.find((f) => f.muscle === muscle);
-    const sets = next.exercises.filter((e) => e.muscle === muscle).flatMap((e) => e.sets);
-    const done = sets.filter((x) => x.done).length;
-    if (done === sets.length && fb && fb.pump == null) setAsk({ muscle, when: "after" });
-  };
-  const beforeLog = (muscle: string, then: () => void): boolean => {
-    const fb = s.feedback.find((f) => f.muscle === muscle);
-    const started = s.exercises.filter((e) => e.muscle === muscle).some((e) => e.sets.some((x) => x.done));
-    if (!started && fb?.askSoreness && fb.soreness == null) {
-      setAsk({ muscle, when: "before", then });
-      return true;
-    }
-    return false;
   };
 
   const p = s.progress;
@@ -203,13 +186,8 @@ function SessionView({
             session={s}
             ex={ex}
             showMuscle={firstOfMuscle}
-            onBeforeLog={(then) => beforeLog(ex.muscle, then)}
-            onChanged={async () => {
-              const next = await api.session(s.meso.id, s.week, s.day);
-              onSession(next);
-              afterLog(next, ex.muscle);
-            }}
-            onRate={() => setAsk({ muscle: ex.muscle, when: "after" })}
+            onChanged={reload}
+            onRate={() => setAsk(ex.muscle)}
           />
         );
       })}
@@ -225,19 +203,14 @@ function SessionView({
 
       {ask && (
         <FeedbackSheet
-          title={label(lib, ask.muscle)}
-          when={ask.when}
+          title={label(lib, ask)}
           scales={s.feedbackScales}
-          current={s.feedback.find((f) => f.muscle === ask.muscle)}
-          onClose={() => {
-            setAsk(null);
-            ask.then?.();
-          }}
+          current={s.feedback.find((f) => f.muscle === ask)}
+          onClose={() => setAsk(null)}
           onSave={async (vals) => {
-            await api.setFeedback(s.meso.id, { week: s.week, day: s.day, muscle: ask.muscle, ...vals });
+            await api.setFeedback(s.meso.id, { week: s.week, day: s.day, muscle: ask, ...vals });
             setAsk(null);
-            if (ask.then) ask.then();
-            else await reload();
+            await reload();
           }}
         />
       )}
@@ -253,7 +226,6 @@ function ExerciseCard({
   session,
   ex,
   showMuscle,
-  onBeforeLog,
   onChanged,
   onRate,
 }: {
@@ -261,7 +233,6 @@ function ExerciseCard({
   session: TrainingSession;
   ex: TrainingSession["exercises"][number];
   showMuscle: boolean;
-  onBeforeLog: (then: () => void) => boolean;
   onChanged: () => Promise<void>;
   onRate: () => void;
 }) {
@@ -358,7 +329,6 @@ function ExerciseCard({
             n={i + 1}
             set={set}
             hint={ex.lastWeek[i] ?? ex.lastWeek.at(-1)}
-            onBeforeLog={onBeforeLog}
             onChanged={onChanged}
             carryW={carried("w", i)}
             carryR={carried("r", i)}
@@ -374,7 +344,6 @@ function SetRow({
   n,
   set,
   hint,
-  onBeforeLog,
   onChanged,
   carryW,
   carryR,
@@ -383,7 +352,6 @@ function SetRow({
   n: number;
   set: TrainingSet;
   hint: { weightLb: number | null; reps: number | null } | undefined;
-  onBeforeLog: (then: () => void) => boolean;
   onChanged: () => Promise<void>;
   carryW: string | undefined;
   carryR: string | undefined;
@@ -423,11 +391,7 @@ function SetRow({
     }
   }
 
-  const toggle = () => {
-    if (set.done) return save(false);
-    if (onBeforeLog(() => save(true))) return;
-    return save(true);
-  };
+  const toggle = () => save(!set.done);
   // Editing a logged set saves on blur.
   const blur = () => {
     if (set.done && (Number(w) !== set.weightLb || Number(r) !== set.reps) && r.trim()) save(undefined);
@@ -467,48 +431,38 @@ function SetRow({
 
 function FeedbackSheet({
   title,
-  when,
   scales,
   current,
   onClose,
   onSave,
 }: {
   title: string;
-  when: "before" | "after";
   scales: FeedbackScales;
-  current: MuscleFeedback | undefined;
+  current: SessionFeedback | undefined;
   onClose: () => void;
   onSave: (vals: Partial<Record<"soreness" | "pump" | "jointPain" | "workload", number>>) => Promise<void>;
 }) {
-  const qs =
-    when === "before"
-      ? ([["soreness", "How sore did you get AFTER training it LAST TIME?"]] as const)
-      : ([
-          ["pump", "How much of a pump did you get today?"],
-          ["jointPain", "How did your joints feel?"],
-          ["workload", "How was the volume of work (number of hard sets)?"],
-        ] as const);
+  // Soreness is about recovery since the muscle was last trained, so it's
+  // only asked once it has been.
+  const qs = [
+    ...(current?.askSoreness ? ([["soreness", "How sore did you get AFTER training it LAST TIME?"]] as const) : []),
+    ["pump", "How much of a pump did you get today?"],
+    ["jointPain", "How did your joints feel?"],
+    ["workload", "How was the volume of work (number of hard sets)?"],
+  ] as const;
   const [vals, setVals] = useState<Partial<Record<(typeof qs)[number][0], number>>>(() =>
     Object.fromEntries(qs.flatMap(([k]) => (current?.[k] != null ? [[k, current[k]]] : []))),
   );
   const [busy, setBusy] = useState(false);
-  const complete = qs.every(([k]) => vals[k] != null);
+  const any = qs.some(([k]) => vals[k] != null);
 
-  const pick = async (k: (typeof qs)[number][0], i: number) => {
-    const next = { ...vals, [k]: i };
-    setVals(next);
-    // One-question sheets save on tap, like RP.
-    if (qs.length === 1) {
-      setBusy(true);
-      await onSave(next);
-    }
-  };
+  const pick = (k: (typeof qs)[number][0], i: number) => setVals((v) => ({ ...v, [k]: i }));
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet train-fb" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`${title} feedback`}>
         <div className="card-head">
-          <p className="label">{title} / {when === "before" ? "before you start" : "how did it go"}</p>
+          <p className="label">{title} / how did it go</p>
           <button className="daynav-btn" onClick={onClose} aria-label="Close">
             <X />
           </button>
@@ -525,23 +479,21 @@ function FeedbackSheet({
             </div>
           </div>
         ))}
-        {qs.length > 1 && (
-          <div className="sheet-actions">
-            <button className="btn ghost" onClick={onClose}>
-              Skip
-            </button>
-            <button
-              className="btn"
-              disabled={!complete || busy}
-              onClick={async () => {
-                setBusy(true);
-                await onSave(vals);
-              }}
-            >
-              Save
-            </button>
-          </div>
-        )}
+        <div className="sheet-actions">
+          <button className="btn ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="btn"
+            disabled={!any || busy}
+            onClick={async () => {
+              setBusy(true);
+              await onSave(vals);
+            }}
+          >
+            Save
+          </button>
+        </div>
       </div>
     </div>
   );

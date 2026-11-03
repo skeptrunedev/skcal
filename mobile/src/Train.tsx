@@ -10,7 +10,7 @@ import {
   currentSession, session as getSession, completeSession, setFeedback, updateSet, deleteSet, addSet, swapExercise,
   todayLocal,
   type TrainingLibrary, type MesoSummary, type MesoDetail, type TrainingSession, type TrainingSet,
-  type FeedbackScales, type MuscleFeedback, type MesoPlanDay,
+  type FeedbackScales, type SessionFeedback, type MesoPlanDay,
 } from "./api";
 import { Sheet, Field } from "./Sheet";
 import { Select, OptionSheet } from "./Select";
@@ -169,8 +169,9 @@ function SessionView({
   const st = useS();
   const { c } = useTheme();
   const [calOpen, setCalOpen] = useState(false);
-  // An open feedback question; `then` resumes the set log that triggered it.
-  const [ask, setAsk] = useState<{ muscle: string; when: "before" | "after"; then?: () => void } | null>(null);
+  // The muscle being rated from an exercise's menu. Feedback is opt-in: logging
+  // a set never interrupts with questions.
+  const [ask, setAsk] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const s = session;
@@ -183,24 +184,6 @@ function SessionView({
     } catch (e) {
       setErr(errText(e));
     }
-  };
-
-  // RP asks how a muscle recovered right before its first set (once it has
-  // been trained before), and how the work went after its last set.
-  const afterLog = (next: TrainingSession, muscle: string) => {
-    const fb = next.feedback.find((f) => f.muscle === muscle);
-    const sets = next.exercises.filter((e) => e.muscle === muscle).flatMap((e) => e.sets);
-    const done = sets.filter((x) => x.done).length;
-    if (done === sets.length && fb && fb.pump == null) setAsk({ muscle, when: "after" });
-  };
-  const beforeLog = (muscle: string, then: () => void): boolean => {
-    const fb = s.feedback.find((f) => f.muscle === muscle);
-    const started = s.exercises.filter((e) => e.muscle === muscle).some((e) => e.sets.some((x) => x.done));
-    if (!started && fb?.askSoreness && fb.soreness == null) {
-      setAsk({ muscle, when: "before", then });
-      return true;
-    }
-    return false;
   };
 
   const p = s.progress;
@@ -271,13 +254,8 @@ function SessionView({
             session={s}
             ex={ex}
             showMuscle={firstOfMuscle}
-            onBeforeLog={(then) => beforeLog(ex.muscle, then)}
-            onChanged={async () => {
-              const next = await getSession(s.meso.id, s.week, s.day);
-              onSession(next);
-              afterLog(next, ex.muscle);
-            }}
-            onRate={() => setAsk({ muscle: ex.muscle, when: "after" })}
+            onChanged={reload}
+            onRate={() => setAsk(ex.muscle)}
           />
         );
       })}
@@ -299,20 +277,15 @@ function SessionView({
 
       {ask && (
         <FeedbackSheet
-          key={`${ask.muscle}:${ask.when}`}
-          title={label(lib, ask.muscle)}
-          when={ask.when}
+          key={ask}
+          title={label(lib, ask)}
           scales={s.feedbackScales}
-          current={s.feedback.find((f) => f.muscle === ask.muscle)}
-          onClose={() => {
-            setAsk(null);
-            ask.then?.();
-          }}
+          current={s.feedback.find((f) => f.muscle === ask)}
+          onClose={() => setAsk(null)}
           onSave={async (vals) => {
-            await setFeedback(s.meso.id, { week: s.week, day: s.day, muscle: ask.muscle, ...vals });
+            await setFeedback(s.meso.id, { week: s.week, day: s.day, muscle: ask, ...vals });
             setAsk(null);
-            if (ask.then) ask.then();
-            else await reload();
+            await reload();
           }}
         />
       )}
@@ -330,7 +303,6 @@ function ExerciseCard({
   session,
   ex,
   showMuscle,
-  onBeforeLog,
   onChanged,
   onRate,
 }: {
@@ -338,7 +310,6 @@ function ExerciseCard({
   session: TrainingSession;
   ex: Ex;
   showMuscle: boolean;
-  onBeforeLog: (then: () => void) => boolean;
   onChanged: () => Promise<void>;
   onRate: () => void;
 }) {
@@ -413,7 +384,6 @@ function ExerciseCard({
             n={i + 1}
             set={set}
             hint={ex.lastWeek[i] ?? ex.lastWeek[ex.lastWeek.length - 1]}
-            onBeforeLog={onBeforeLog}
             onChanged={onChanged}
             onError={setErr}
             carryW={carried("w", i)}
@@ -443,7 +413,6 @@ function SetRow({
   n,
   set,
   hint,
-  onBeforeLog,
   onChanged,
   onError,
   carryW,
@@ -453,7 +422,6 @@ function SetRow({
   n: number;
   set: TrainingSet;
   hint: { weightLb: number | null; reps: number | null } | undefined;
-  onBeforeLog: (then: () => void) => boolean;
   onChanged: () => Promise<void>;
   onError: (e: string | null) => void;
   carryW: string | undefined;
@@ -499,11 +467,7 @@ function SetRow({
     }
   };
 
-  const toggle = () => {
-    if (set.done) return save(false);
-    if (onBeforeLog(() => save(true))) return;
-    return save(true);
-  };
+  const toggle = () => save(!set.done);
   // Editing a logged set saves on blur.
   const blur = () => {
     if (set.done && (Number(w) !== set.weightLb || Number(r) !== set.reps) && r.trim()) save(undefined);
@@ -560,34 +524,32 @@ type FbKey = "soreness" | "pump" | "jointPain" | "workload";
 
 function FeedbackSheet({
   title,
-  when,
   scales,
   current,
   onClose,
   onSave,
 }: {
   title: string;
-  when: "before" | "after";
   scales: FeedbackScales;
-  current: MuscleFeedback | undefined;
+  current: SessionFeedback | undefined;
   onClose: () => void;
   onSave: (vals: Partial<Record<FbKey, number>>) => Promise<void>;
 }) {
   const s = useS();
-  const qs: (readonly [FbKey, string])[] =
-    when === "before"
-      ? [["soreness", "How sore did you get AFTER training it LAST TIME?"]]
-      : [
-          ["pump", "How much of a pump did you get today?"],
-          ["jointPain", "How did your joints feel?"],
-          ["workload", "How was the volume of work (number of hard sets)?"],
-        ];
+  // Soreness is about recovery since the muscle was last trained, so it's
+  // only asked once it has been.
+  const qs: (readonly [FbKey, string])[] = [
+    ...(current?.askSoreness ? [["soreness", "How sore did you get AFTER training it LAST TIME?"] as const] : []),
+    ["pump", "How much of a pump did you get today?"],
+    ["jointPain", "How did your joints feel?"],
+    ["workload", "How was the volume of work (number of hard sets)?"],
+  ];
   const [vals, setVals] = useState<Partial<Record<FbKey, number>>>(() =>
     Object.fromEntries(qs.flatMap(([k]) => (current?.[k] != null ? [[k, current[k]]] : []))),
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const complete = qs.every(([k]) => vals[k] != null);
+  const any = qs.some(([k]) => vals[k] != null);
 
   const submit = async (next: Partial<Record<FbKey, number>>) => {
     setBusy(true);
@@ -599,23 +561,17 @@ function FeedbackSheet({
       setBusy(false);
     }
   };
-  const pick = (k: FbKey, i: number) => {
-    const next = { ...vals, [k]: i };
-    setVals(next);
-    // One-question sheets save on tap, like RP.
-    if (qs.length === 1) submit(next);
-  };
+  const pick = (k: FbKey, i: number) => setVals((v) => ({ ...v, [k]: i }));
 
   return (
     <Sheet
       open
-      title={`${title} / ${when === "before" ? "before you start" : "how did it go"}`}
+      title={`${title} / how did it go`}
       onClose={onClose}
-      onSave={qs.length > 1 ? () => submit(vals) : undefined}
-      saveDisabled={!complete}
+      onSave={() => submit(vals)}
+      saveDisabled={!any}
       saving={busy}
       error={error}
-      cancelLabel="Skip"
     >
       {qs.map(([k, q]) => (
         <View key={k} style={s.fbQ}>
