@@ -610,9 +610,11 @@ function MesoCalendar({ summary, at, onPick }: { summary: MesoSummary; at: { wee
             return (
               <Pressable
                 key={d.day}
-                style={[s.calDay, d.done && s.calDayDone, here && s.calDayAt]}
+                style={[s.calDay, d.done && s.calDayDone, here && s.calDayAt, !d.scheduled && s.calDayOff]}
                 onPress={() => onPick(w.week, d.day)}
+                disabled={!d.scheduled}
                 accessibilityRole="button"
+                accessibilityState={{ disabled: !d.scheduled }}
                 accessibilityLabel={`Week ${w.week} day ${d.day}${d.label ? `, ${d.label}` : ""}${d.done ? ", done" : ""}`}
               >
                 <Text style={[s.calDayText, d.done && s.calDayTextDone, here && s.calDayTextAt]}>D{d.day}</Text>
@@ -1078,6 +1080,7 @@ const useS = makeStyles((c) =>
     calSub: { color: c.dim, fontSize: 9, fontFamily: "monospace", textAlign: "center", marginTop: -4 },
     calDay: { borderWidth: 1, borderColor: c.line, backgroundColor: c.field, borderRadius: 7, paddingVertical: 8, alignItems: "center" },
     calDayDone: { backgroundColor: c.raised, borderColor: c.dim },
+    calDayOff: { borderStyle: "dashed", backgroundColor: "transparent" },
     calDayAt: { borderColor: c.amberText },
     calDayText: { color: c.muted, fontSize: 11, fontFamily: "monospace" },
     calDayTextDone: { color: c.fg },

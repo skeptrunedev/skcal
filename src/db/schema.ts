@@ -1416,6 +1416,9 @@ export const mesoDays = sqliteTable(
     userEmail: text("user_email").notNull(),
     position: integer("position").notNull(), // 1-based day number within a week
     label: text("label"), // e.g. "Upper A"
+    // First week this day is programmed: 1 for days planned with the meso,
+    // later for a day added mid-mesocycle (its earlier weeks don't exist).
+    firstWeek: integer("first_week").notNull().default(1),
   },
   (t) => [index("meso_days_meso_idx").on(t.mesoId)],
 );

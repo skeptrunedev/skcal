@@ -514,7 +514,8 @@ function MesoCalendar({ summary, at, onPick }: { summary: MesoSummary; at: { wee
               key={d.day}
               className={`train-cal-day ${d.done ? "done" : ""} ${at.week === w.week && at.day === d.day ? "at" : ""}`}
               onClick={() => onPick(w.week, d.day)}
-              title={d.label ?? undefined}
+              disabled={!d.scheduled}
+              title={d.scheduled ? (d.label ?? undefined) : "added later in the mesocycle"}
             >
               D{d.day}
             </button>

@@ -633,7 +633,7 @@ export type TrainingLibrary = {
   feedbackScales: FeedbackScales;
   exercises: Exercise[];
 };
-export type MesoCalendarWeek = { week: number; rir: number | null; deload: boolean; days: { day: number; label: string | null; done: boolean }[] };
+export type MesoCalendarWeek = { week: number; rir: number | null; deload: boolean; days: { day: number; label: string | null; done: boolean; scheduled: boolean }[] };
 export type MesoSummary = {
   id: string;
   name: string;
@@ -650,7 +650,7 @@ export type MesoSummary = {
   calendar: MesoCalendarWeek[];
 };
 export type MesoDetail = MesoSummary & {
-  days: { id: string; day: number; label: string | null; slots: { id: string; muscle: string; exerciseId: string; exerciseName: string; equipment: string }[] }[];
+  days: { id: string; day: number; label: string | null; firstWeek: number; slots: { id: string; muscle: string; exerciseId: string; exerciseName: string; equipment: string }[] }[];
   // Per week: every day has been reached, so its set counts are final.
   weekPlanned: boolean[];
   volume: { muscle: string; label: string; mev: number | null; mav: [number, number] | null; mrv: number | null; setsByWeek: number[] }[];

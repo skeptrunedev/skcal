@@ -287,6 +287,91 @@ describe("training API: timing", () => {
   });
 });
 
+describe("training API: editing the plan", () => {
+  const user = "planner@example.com";
+  type Detail = {
+    id: string;
+    daysPerWeek: number;
+    sessionsTotal: number;
+    next: { week: number; day: number } | null;
+    calendar: { week: number; days: { day: number; scheduled: boolean }[] }[];
+    days: { id: string; day: number; label: string | null; firstWeek: number; slots: { id: string; muscle: string }[] }[];
+  };
+  const detail = async (id: string) => json<Detail>(await as(user, `/api/training/mesocycles/${id}`));
+
+  it("adds, edits, and deletes training days and their exercises", async () => {
+    const created = await as(user, "/api/training/mesocycles", { method: "POST", body: JSON.stringify({ template: "ppl_3", weeks: 5 }) });
+    const mesoId = (await json<{ mesocycle: { id: string } }>(created)).mesocycle.id;
+    for (const day of [1, 2, 3]) expect((await as(user, `/api/training/mesocycles/${mesoId}/sessions/1/${day}/complete`, { method: "POST" })).status).toBe(200);
+
+    // A day added in week 2 starts there: week 1 isn't a skipped session.
+    const added = await as(user, `/api/training/mesocycles/${mesoId}/days`, {
+      method: "POST",
+      body: JSON.stringify({ label: "Arms", position: 2, slots: [{ muscle: "biceps" }, { muscle: "triceps" }] }),
+    });
+    expect(added.status).toBe(200);
+    const arms = (await json<{ day: { id: string; day: number; firstWeek: number } }>(added)).day;
+    expect(arms).toMatchObject({ day: 2, firstWeek: 2 });
+    let m = await detail(mesoId);
+    expect(m.daysPerWeek).toBe(4);
+    expect(m.days.map((d) => d.label)).toEqual(["Push", "Arms", "Pull", "Legs"]);
+    expect(m.sessionsTotal).toBe(3 * 5 + 4);
+    expect(m.calendar[0].days.find((d) => d.day === 2)!.scheduled).toBe(false);
+    expect(m.next).toEqual({ week: 2, day: 1, label: "Push" });
+    expect((await as(user, `/api/training/mesocycles/${mesoId}/sessions/1/2`)).status).toBe(400);
+    const armsW2 = await json<Session>(await as(user, `/api/training/mesocycles/${mesoId}/sessions/2/2`));
+    expect(armsW2.exercises.map((e) => e.muscle)).toEqual(["biceps", "triceps"]);
+    expect(armsW2.exercises.every((e) => e.sets.length >= 2)).toBe(true);
+
+    // Rename and move it.
+    const moved = await as(user, `/api/training/days/${arms.id}`, { method: "PATCH", body: JSON.stringify({ label: "Arms + delts", position: 4 }) });
+    expect(moved.status).toBe(200);
+    m = await detail(mesoId);
+    expect(m.days.map((d) => [d.day, d.label])).toEqual([
+      [1, "Push"],
+      [2, "Pull"],
+      [3, "Legs"],
+      [4, "Arms + delts"],
+    ]);
+
+    // Add an exercise to Push: it gets sets in the planned, unfinished week 2, not finished week 1.
+    const push = m.days[0];
+    const slotRes = await as(user, `/api/training/days/${push.id}/slots`, { method: "POST", body: JSON.stringify({ muscle: "side_delts", position: 1 }) });
+    expect(slotRes.status).toBe(200);
+    const slot = (await json<{ slot: { slotId: string; position: number }; weeksPlanned: number[] }>(slotRes));
+    expect(slot.weeksPlanned).toEqual([2]);
+    const pushW2 = await json<Session>(await as(user, `/api/training/mesocycles/${mesoId}/sessions/2/1`));
+    expect(pushW2.exercises[0]).toMatchObject({ slotId: slot.slot.slotId, muscle: "side_delts" });
+    expect(pushW2.exercises[0].sets.length).toBeGreaterThan(0);
+
+    // Remove it again; a day's only exercise can't go.
+    expect((await as(user, `/api/training/slots/${slot.slot.slotId}`, { method: "DELETE" })).status).toBe(200);
+    expect((await json<Session>(await as(user, `/api/training/mesocycles/${mesoId}/sessions/2/1`))).exercises.some((e) => e.slotId === slot.slot.slotId)).toBe(false);
+
+    // Delete a day that has a finished session: the rest renumber, its workout stays.
+    const pull = m.days[1];
+    const del = await as(user, `/api/training/days/${pull.id}`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+    expect((await json<{ deleted: { sessionsDone: number } }>(del)).deleted.sessionsDone).toBe(1);
+    m = await detail(mesoId);
+    expect(m.days.map((d) => [d.day, d.label])).toEqual([
+      [1, "Push"],
+      [2, "Legs"],
+      [3, "Arms + delts"],
+    ]);
+    expect(m.daysPerWeek).toBe(3);
+    expect((await as(user, `/api/training/days/${pull.id}`, { method: "DELETE" })).status).toBe(404);
+    expect((await as("someone-else@example.com", `/api/training/days/${m.days[0].id}`, { method: "DELETE" })).status).toBe(404);
+
+    // Deleting down to one day works; the last day can't go.
+    await as(user, `/api/training/days/${m.days[1].id}`, { method: "DELETE" });
+    await as(user, `/api/training/days/${m.days[2].id}`, { method: "DELETE" });
+    m = await detail(mesoId);
+    expect(m.days).toHaveLength(1);
+    expect((await as(user, `/api/training/days/${m.days[0].id}`, { method: "DELETE" })).status).toBe(400);
+  });
+});
+
 describe("phases API", () => {
   const user = "bulker@example.com";
   it("starts a bulk, mirrors it into targets, and closes it on the next phase", async () => {

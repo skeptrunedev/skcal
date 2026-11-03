@@ -5,14 +5,18 @@
 import { Hono, type Context } from "hono";
 import { deletePhaseForUser, endPhaseForUser, listPhasesForUser, startPhaseForUser, updatePhaseForUser, type PhaseInput } from "./phases";
 import {
+  addDayForUser,
   addSetForUser,
+  addSlotForUser,
   completeSessionForUser,
   createExerciseForUser,
   createMesocycleForUser,
   currentSessionForUser,
+  deleteDayForUser,
   deleteExerciseForUser,
   deleteMesocycleForUser,
   deleteSetForUser,
+  deleteSlotForUser,
   getMesocycleForUser,
   getSessionForUser,
   listExercisesForUser,
@@ -20,6 +24,7 @@ import {
   logSetsForUser,
   setFeedbackForUser,
   swapExerciseForUser,
+  updateDayForUser,
   updateMesocycleForUser,
   updateSetForUser,
 } from "./training-store";
@@ -52,7 +57,7 @@ import { MUSCLES, TEMPLATES } from "./training-data";
  *       name: id
  *       in: path
  *       required: true
- *       description: Identifier of the mesocycle, set, slot, or custom exercise the path names.
+ *       description: Identifier of the mesocycle, training day, set, slot, or custom exercise the path names.
  *       schema:
  *         type: string
  *         example: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
@@ -411,6 +416,65 @@ import { MUSCLES, TEMPLATES } from "./training-data";
  *           type: string
  *           description: Free-text notes.
  *           example: focus on chest and side delts
+ *     TrainingDayInput:
+ *       type: object
+ *       description: A training day to add to an active mesocycle.
+ *       additionalProperties: false
+ *       required: [slots]
+ *       properties:
+ *         label:
+ *           type: string
+ *           description: Label for the new day.
+ *           example: Arms
+ *         position:
+ *           type: integer
+ *           minimum: 1
+ *           description: Day number to insert at (default last); later days shift down.
+ *           example: 3
+ *         slots:
+ *           type: array
+ *           minItems: 1
+ *           maxItems: 12
+ *           description: The new day's exercises, in order.
+ *           items:
+ *             $ref: '#/components/schemas/SlotInput'
+ *           example: [{ muscle: biceps }, { muscle: triceps, exerciseName: cable pushdown }]
+ *     TrainingDayPatch:
+ *       type: object
+ *       description: Training day fields to change.
+ *       additionalProperties: false
+ *       properties:
+ *         label:
+ *           type: [string, "null"]
+ *           description: New label; empty or null clears it.
+ *           example: Upper B
+ *         position:
+ *           type: integer
+ *           minimum: 1
+ *           description: New day number within the week.
+ *           example: 2
+ *     SlotInput:
+ *       type: object
+ *       description: One exercise slot; give a muscle, an exercise, or both.
+ *       additionalProperties: false
+ *       properties:
+ *         muscle:
+ *           type: string
+ *           description: Muscle key (inferred from the exercise when omitted).
+ *           example: biceps
+ *         exerciseId:
+ *           type: string
+ *           description: Library id of the exercise to add.
+ *           example: barbell_curl
+ *         exerciseName:
+ *           type: string
+ *           description: Name of the exercise to add, matched against the library when no id is given.
+ *           example: incline dumbbell curl
+ *         position:
+ *           type: integer
+ *           minimum: 1
+ *           description: Order within the day (default last). Only used when adding to an existing day.
+ *           example: 2
  *     MesocyclePatch:
  *       type: object
  *       description: Mesocycle fields to change.
@@ -601,7 +665,7 @@ import { MUSCLES, TEMPLATES } from "./training-data";
 type Env = { Bindings: { DB: D1Database }; Variables: { email: string } };
 type Ctx = Context<Env>;
 
-const NOT_FOUND = /^no (phase|mesocycle|set|slot|exercise) with that id$/;
+const NOT_FOUND = /^no (phase|mesocycle|set|slot|exercise|training day) with that id$/;
 // A helper's result as the response: { error } maps to 404 (unknown id) or
 // 400 (bad input), anything else is a 200.
 const reply = (c: Ctx, r: object) => {
@@ -1286,4 +1350,156 @@ app.patch("/api/training/slots/:id", async (c) => {
   const b = await body<{ exerciseId?: unknown; exerciseName?: unknown; fromWeek?: unknown }>(c);
   const r = await swapExerciseForUser(c, c.get("email"), c.req.param("id"), b, b.fromWeek != null ? Number(b.fromWeek) : 1);
   return reply(c, r);
+});
+
+/**
+ * @openapi
+ * /api/training/slots/{id}:
+ *   delete:
+ *     tags: [Training]
+ *     summary: Remove an exercise from a day
+ *     description: Removes an exercise slot from its training day for the whole mesocycle, with all its sets.
+ *     operationId: deleteSlot
+ *     parameters:
+ *       - $ref: '#/components/parameters/TrainingId'
+ *     responses:
+ *       '200':
+ *         description: The slot was removed.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TrainingResult'
+ *       '400':
+ *         $ref: '#/components/responses/BadRequest'
+ *       '404':
+ *         $ref: '#/components/responses/NotFound'
+ */
+app.delete("/api/training/slots/:id", async (c) => {
+  return reply(c, await deleteSlotForUser(c, c.get("email"), c.req.param("id")));
+});
+
+/**
+ * @openapi
+ * /api/training/mesocycles/{id}/days:
+ *   post:
+ *     tags: [Training]
+ *     summary: Add a training day
+ *     description: >-
+ *       Adds a training day to an active mesocycle's week. Mid-mesocycle it starts in the week of the
+ *       next session due (earlier weeks don't count as skipped); its exercises start at MEV.
+ *     operationId: addTrainingDay
+ *     parameters:
+ *       - $ref: '#/components/parameters/TrainingId'
+ *     requestBody:
+ *       required: true
+ *       description: The day's label, position, and exercises.
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/TrainingDayInput'
+ *     responses:
+ *       '200':
+ *         description: The new day.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TrainingResult'
+ *       '400':
+ *         $ref: '#/components/responses/BadRequest'
+ *       '404':
+ *         $ref: '#/components/responses/NotFound'
+ */
+app.post("/api/training/mesocycles/:id/days", async (c) => {
+  return reply(c, await addDayForUser(c, c.get("email"), c.req.param("id"), await body(c)));
+});
+
+/**
+ * @openapi
+ * /api/training/days/{id}:
+ *   patch:
+ *     tags: [Training]
+ *     summary: Edit a training day
+ *     description: Renames a training day or moves it to another day number in the week.
+ *     operationId: updateTrainingDay
+ *     parameters:
+ *       - $ref: '#/components/parameters/TrainingId'
+ *     requestBody:
+ *       required: true
+ *       description: The fields to change.
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/TrainingDayPatch'
+ *     responses:
+ *       '200':
+ *         description: The updated day.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TrainingResult'
+ *       '400':
+ *         $ref: '#/components/responses/BadRequest'
+ *       '404':
+ *         $ref: '#/components/responses/NotFound'
+ *   delete:
+ *     tags: [Training]
+ *     summary: Delete a training day
+ *     description: >-
+ *       Removes a training day with its exercises and every week's sets, feedback, and completions.
+ *       Workouts its finished sessions logged stay. Later days renumber.
+ *     operationId: deleteTrainingDay
+ *     parameters:
+ *       - $ref: '#/components/parameters/TrainingId'
+ *     responses:
+ *       '200':
+ *         description: The day was deleted.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TrainingResult'
+ *       '400':
+ *         $ref: '#/components/responses/BadRequest'
+ *       '404':
+ *         $ref: '#/components/responses/NotFound'
+ */
+app.patch("/api/training/days/:id", async (c) => {
+  return reply(c, await updateDayForUser(c, c.get("email"), c.req.param("id"), await body(c)));
+});
+app.delete("/api/training/days/:id", async (c) => {
+  return reply(c, await deleteDayForUser(c, c.get("email"), c.req.param("id")));
+});
+
+/**
+ * @openapi
+ * /api/training/days/{id}/slots:
+ *   post:
+ *     tags: [Training]
+ *     summary: Add an exercise to a day
+ *     description: >-
+ *       Adds an exercise slot to a training day for the rest of the mesocycle, with starting sets in
+ *       every planned week of that day not yet completed.
+ *     operationId: addSlot
+ *     parameters:
+ *       - $ref: '#/components/parameters/TrainingId'
+ *     requestBody:
+ *       required: true
+ *       description: The exercise to add.
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/SlotInput'
+ *     responses:
+ *       '200':
+ *         description: The new slot.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TrainingResult'
+ *       '400':
+ *         $ref: '#/components/responses/BadRequest'
+ *       '404':
+ *         $ref: '#/components/responses/NotFound'
+ */
+app.post("/api/training/days/:id/slots", async (c) => {
+  return reply(c, await addSlotForUser(c, c.get("email"), c.req.param("id"), await body(c)));
 });

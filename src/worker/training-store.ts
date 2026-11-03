@@ -4,6 +4,7 @@
 // *ForUser helpers. Programming math lives in ./training.
 import { drizzle } from "drizzle-orm/d1";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import * as schema from "../db/schema";
 import { BUILTIN_EXERCISES, MUSCLES, TEMPLATES } from "./training-data";
 import {
@@ -281,7 +282,7 @@ const feedbackOut = (f: FeedbackRow | undefined) =>
 /** The first (week, day) in order that isn't completed; null when all are. */
 function nextSession(L: Loaded): { week: number; day: Day } | null {
   const done = new Set(L.sessions.map((s) => `${s.week}:${s.dayId}`));
-  for (let w = 1; w <= L.meso.weeks; w++) for (const d of L.days) if (!done.has(`${w}:${d.id}`)) return { week: w, day: d };
+  for (let w = 1; w <= L.meso.weeks; w++) for (const d of L.days) if (w >= d.firstWeek && !done.has(`${w}:${d.id}`)) return { week: w, day: d };
   return null;
 }
 
@@ -299,7 +300,7 @@ function mesoSummary(L: Loaded) {
     endedDate: L.meso.endedDate,
     notes: L.meso.notes,
     sessionsDone: L.sessions.length,
-    sessionsTotal: L.meso.weeks * L.days.length,
+    sessionsTotal: L.days.reduce((a, d) => a + L.meso.weeks - d.firstWeek + 1, 0),
     next: next ? { week: next.week, day: next.day.position, label: next.day.label } : null,
     muscles,
     // The calendar grid: one cell per (week, day) like RP's meso overview.
@@ -307,7 +308,8 @@ function mesoSummary(L: Loaded) {
       week: i + 1,
       rir: rirForWeek(i + 1, L.meso.weeks),
       deload: isDeload(i + 1, L.meso.weeks),
-      days: L.days.map((d) => ({ day: d.position, label: d.label, done: done.has(`${i + 1}:${d.id}`) })),
+      // scheduled is false for weeks before a day added mid-mesocycle starts.
+      days: L.days.map((d) => ({ day: d.position, label: d.label, done: done.has(`${i + 1}:${d.id}`), scheduled: i + 1 >= d.firstWeek })),
     })),
   };
 }
@@ -336,11 +338,12 @@ export async function getMesocycleForUser(c: Env, email: string, id: string) {
       id: d.id,
       day: d.position,
       label: d.label,
+      firstWeek: d.firstWeek,
       slots: L.slots.filter((s) => s.dayId === d.id).map((s) => ({ id: s.id, muscle: s.muscle, exerciseId: s.exerciseId, exerciseName: s.exerciseName, equipment: s.equipment })),
     })),
     // Weeks get planned a day at a time as sessions finish; a week's totals
     // are only final once every day in it has sets.
-    weekPlanned: Array.from({ length: L.meso.weeks }, (_, i) => L.days.every((d) => L.sets.some((s) => s.week === i + 1 && s.dayId === d.id))),
+    weekPlanned: Array.from({ length: L.meso.weeks }, (_, i) => L.days.every((d) => i + 1 < d.firstWeek || L.sets.some((s) => s.week === i + 1 && s.dayId === d.id))),
     // Planned sets per muscle per week, next to its landmarks.
     volume: Object.entries(volume).map(([m, sets]) => {
       const info = muscleInfo(m);
@@ -350,13 +353,14 @@ export async function getMesocycleForUser(c: Env, email: string, id: string) {
 }
 
 /**
- * Make sure a session's sets exist. Week 1 is created with the mesocycle; a
+ * Make sure a session's sets exist. A day's first week is seeded when the day
+ * is created (week 1 with the mesocycle, later for a day added mid-meso); a
  * later week is planned from the previous week's same day (whether or not that
  * session was formally completed), so jumping ahead never shows an empty day.
  */
 async function ensureWeek(c: Env, L: Loaded, week: number, day: Day): Promise<boolean> {
   if (L.sets.some((s) => s.week === week && s.dayId === day.id)) return false;
-  if (week <= 1) return false;
+  if (week <= day.firstWeek) return false;
   const prevWeek = week - 1;
   if (!L.sets.some((s) => s.week === prevWeek && s.dayId === day.id)) await ensureWeek(c, L, prevWeek, day);
   const daySlots = L.slots.filter((s) => s.dayId === day.id);
@@ -459,6 +463,7 @@ export async function getSessionForUser(c: Env, email: string, mesoId: string, w
     }
   }
   if (!day || w < 1 || w > L.meso.weeks) return { error: "no such week/day in this mesocycle" };
+  if (w < day.firstWeek) return { error: `day ${day.position} was added in week ${day.firstWeek}, so it has no week ${w} session` };
   await ensureWeek(c, L, w, day);
   return sessionOut(L, w, day);
 }
@@ -691,7 +696,7 @@ export async function completeSessionForUser(c: Env, email: string, mesoId: stri
   const L = await loadMeso(c, email, mesoId);
   if (!L) return { error: "no mesocycle with that id" };
   const day = L.days.find((d) => d.position === dayPos);
-  if (!day || !(week >= 1 && week <= L.meso.weeks)) return { error: "no such week/day in this mesocycle" };
+  if (!day || !(week >= day.firstWeek && week <= L.meso.weeks)) return { error: "no such week/day in this mesocycle" };
   if (L.sessions.some((s) => s.week === week && s.dayId === day.id)) return { error: "that session is already complete" };
   await ensureWeek(c, L, week, day);
 
@@ -801,6 +806,191 @@ export async function deleteMesocycleForUser(c: Env, email: string, id: string):
     d.delete(schema.mesocycles).where(eq(schema.mesocycles.id, id)),
   ]);
   return true;
+}
+
+// ---- editing the plan: training days and their exercises -------------------
+
+/** The meso for a plan edit, loaded; structure only changes while active. */
+async function loadActiveMeso(c: Env, email: string, mesoId: string) {
+  const L = await loadMeso(c, email, mesoId);
+  if (!L) return { error: "no mesocycle with that id" };
+  if (L.meso.status !== "active") return { error: "only an active mesocycle's plan can be changed" };
+  return L;
+}
+
+/** Week-1-style starting sets for new slots in a week: MEV split across every slot for the muscle, halved on the deload. */
+function seedSets(L: Loaded, newSlots: Slot[], week: number) {
+  const counts = initialSetCounts([...L.slots, ...newSlots].map((s) => ({ id: s.id, muscle: s.muscle })));
+  const rir = rirForWeek(week, L.meso.weeks);
+  return newSlots.flatMap((s) => {
+    const n = counts.get(s.id) ?? 2;
+    const reps = muscleInfo(s.muscle)?.defaultReps ?? 10;
+    return Array.from({ length: isDeload(week, L.meso.weeks) ? Math.ceil(n / 2) : n }, (_, k) => newSet(s, week, k + 1, { targetReps: reps, targetWeightLb: null }, rir));
+  });
+}
+
+function slotRow(L: Loaded, dayId: string, position: number, muscle: string, ex: ExerciseOut): Slot {
+  return { id: crypto.randomUUID(), mesoId: L.meso.id, dayId, userEmail: L.meso.userEmail, position, muscle, exerciseId: ex.id, exerciseName: ex.name, equipment: ex.equipment };
+}
+
+/** Run writes as one D1 batch (one transaction); a no-op when there are none. */
+async function writeAll(c: Env, writes: BatchItem<"sqlite">[]) {
+  if (!writes.length) return;
+  const [first, ...rest] = writes;
+  await db(c).batch([first, ...rest]);
+}
+
+/** Updates that give days positions 1..n in the given order. */
+function renumberDays(c: Env, days: Day[]) {
+  return days.flatMap((x, i) => (x.position === i + 1 ? [] : [db(c).update(schema.mesoDays).set({ position: i + 1 }).where(eq(schema.mesoDays.id, x.id))]));
+}
+
+const clampPosition = (v: unknown, max: number) => (v == null || v === "" ? max : Math.min(max, Math.max(1, Math.round(Number(v)) || max)));
+
+/**
+ * Add a training day. Mid-mesocycle it starts in the week of the next session
+ * due, so its earlier weeks don't count as skipped; sets start at MEV like a
+ * new mesocycle's. position (1-based) defaults to the end.
+ */
+export async function addDayForUser(c: Env, email: string, mesoId: string, input: { label?: unknown; slots?: unknown; position?: unknown }) {
+  const L = await loadActiveMeso(c, email, mesoId);
+  if ("error" in L) return L;
+  if (L.days.length >= MAX_DAYS) return { error: `a mesocycle has at most ${MAX_DAYS} days per week` };
+  const plan = await resolveDays(c, email, { days: [{ label: input.label, slots: input.slots }] });
+  if ("error" in plan) return { error: plan.error.replace(/^day 1: /, "") };
+  const firstWeek = nextSession(L)?.week ?? 1;
+  const position = clampPosition(input.position, L.days.length + 1);
+  const day: Day = { id: crypto.randomUUID(), mesoId, userEmail: email, position, label: plan[0].label, firstWeek };
+  const slots = plan[0].slots.map((s, j) => slotRow(L, day.id, j + 1, s.muscle, s.exercise));
+  const ordered = [...L.days];
+  ordered.splice(position - 1, 0, day);
+  const d = db(c);
+  await writeAll(c, [
+    d.insert(schema.mesoDays).values(day),
+    ...renumberDays(c, ordered),
+    d.update(schema.mesocycles).set({ daysPerWeek: ordered.length }).where(eq(schema.mesocycles.id, mesoId)),
+    ...chunk(slots).map((r) => d.insert(schema.mesoSlots).values(r)),
+    ...chunk(seedSets(L, slots, firstWeek)).map((r) => d.insert(schema.mesoSets).values(r)),
+  ]);
+  return { ok: true as const, day: { id: day.id, day: position, label: day.label, firstWeek, exercises: slots.map((s) => ({ slotId: s.id, muscle: s.muscle, exerciseName: s.exerciseName })) } };
+}
+
+/** Rename a training day or move it to another position in the week. */
+export async function updateDayForUser(c: Env, email: string, dayId: string, input: { label?: unknown; position?: unknown }) {
+  const day = (await db(c).select().from(schema.mesoDays).where(and(eq(schema.mesoDays.id, dayId), eq(schema.mesoDays.userEmail, email))).limit(1))[0];
+  if (!day) return { error: "no training day with that id" };
+  const L = await loadActiveMeso(c, email, day.mesoId);
+  if ("error" in L) return L;
+  if (input.label === undefined && input.position === undefined) return { error: "nothing to change" };
+  const d = db(c);
+  const writes: BatchItem<"sqlite">[] = [];
+  let label = day.label;
+  if (input.label !== undefined) {
+    label = typeof input.label === "string" ? input.label.trim().slice(0, 40) || null : null;
+    writes.push(d.update(schema.mesoDays).set({ label }).where(eq(schema.mesoDays.id, dayId)));
+  }
+  let position = day.position;
+  if (input.position !== undefined) {
+    position = clampPosition(input.position, L.days.length);
+    const ordered = L.days.filter((x) => x.id !== dayId);
+    ordered.splice(position - 1, 0, day);
+    writes.push(...renumberDays(c, ordered));
+  }
+  await writeAll(c, writes);
+  return { ok: true as const, day: { id: dayId, day: position, label } };
+}
+
+/**
+ * Delete a training day from the plan: its exercises, every week's sets and
+ * feedback, and its completed-session records. Workouts its finished sessions
+ * logged stay, like deleting a mesocycle. The last day can't go; delete or end
+ * the mesocycle instead.
+ */
+export async function deleteDayForUser(c: Env, email: string, dayId: string) {
+  const day = (await db(c).select().from(schema.mesoDays).where(and(eq(schema.mesoDays.id, dayId), eq(schema.mesoDays.userEmail, email))).limit(1))[0];
+  if (!day) return { error: "no training day with that id" };
+  const L = await loadActiveMeso(c, email, day.mesoId);
+  if ("error" in L) return L;
+  if (L.days.length <= MIN_DAYS) return { error: "that's the mesocycle's only day, delete or end the mesocycle instead" };
+  const rest = L.days.filter((x) => x.id !== dayId);
+  const d = db(c);
+  const loggedSets = L.sets.filter((s) => s.dayId === dayId && s.loggedAt).length;
+  const sessionsDone = L.sessions.filter((s) => s.dayId === dayId).length;
+  await d.batch([
+    d.delete(schema.mesoSets).where(eq(schema.mesoSets.dayId, dayId)),
+    d.delete(schema.mesoFeedback).where(and(eq(schema.mesoFeedback.mesoId, day.mesoId), eq(schema.mesoFeedback.dayId, dayId))),
+    d.delete(schema.mesoSessions).where(and(eq(schema.mesoSessions.mesoId, day.mesoId), eq(schema.mesoSessions.dayId, dayId))),
+    d.delete(schema.mesoSlots).where(eq(schema.mesoSlots.dayId, dayId)),
+    d.delete(schema.mesoDays).where(eq(schema.mesoDays.id, dayId)),
+    d.update(schema.mesocycles).set({ daysPerWeek: rest.length }).where(eq(schema.mesocycles.id, day.mesoId)),
+    ...renumberDays(c, rest),
+  ]);
+  // Dropping the only unfinished day can leave nothing due: that's a finished meso.
+  L.days = rest;
+  L.sessions = L.sessions.filter((s) => s.dayId !== dayId);
+  const mesoCompleted = !nextSession(L);
+  if (mesoCompleted)
+    await d.update(schema.mesocycles).set({ status: "completed", endedDate: new Date().toISOString().slice(0, 10) }).where(eq(schema.mesocycles.id, day.mesoId));
+  return { ok: true as const, deleted: { id: dayId, day: day.position, label: day.label, loggedSets, sessionsDone }, daysPerWeek: rest.length, mesoCompleted };
+}
+
+/**
+ * Add an exercise to a training day. It gets starting sets in every week of
+ * that day already planned and not yet completed; later weeks progress from
+ * those. position (1-based) defaults to the end of the day.
+ */
+export async function addSlotForUser(c: Env, email: string, dayId: string, input: { muscle?: unknown; exerciseId?: unknown; exerciseName?: unknown; position?: unknown }) {
+  const day = (await db(c).select().from(schema.mesoDays).where(and(eq(schema.mesoDays.id, dayId), eq(schema.mesoDays.userEmail, email))).limit(1))[0];
+  if (!day) return { error: "no training day with that id" };
+  const L = await loadActiveMeso(c, email, day.mesoId);
+  if ("error" in L) return L;
+  const daySlots = L.slots.filter((s) => s.dayId === dayId);
+  if (daySlots.length >= 12) return { error: "a day has at most 12 exercises" };
+  let muscle = input.muscle;
+  let ex: ExerciseOut | null = null;
+  if (input.exerciseId || input.exerciseName) {
+    ex = await resolveExercise(c, email, { id: input.exerciseId, name: input.exerciseName, muscle: isMuscle(muscle) ? muscle : undefined });
+    if (!ex) return { error: `no exercise matching '${String(input.exerciseId ?? input.exerciseName)}'${isMuscle(muscle) ? ` for ${muscle}` : ""}` };
+    muscle ??= ex.muscle;
+  }
+  if (!isMuscle(muscle)) return { error: `unknown muscle '${String(muscle)}'` };
+  if (!ex) {
+    ex = defaultExercise(await listExercisesForUser(c, email), muscle, new Set(daySlots.map((s) => s.exerciseId)));
+    if (!ex) return { error: `no exercises in the library for ${muscle}` };
+  }
+  const position = clampPosition(input.position, daySlots.length + 1);
+  const slot = slotRow(L, dayId, position, muscle, ex);
+  const done = new Set(L.sessions.filter((s) => s.dayId === dayId).map((s) => s.week));
+  const weeks = [...new Set(L.sets.filter((s) => s.dayId === dayId).map((s) => s.week))].filter((w) => !done.has(w));
+  const sets = weeks.flatMap((w) => seedSets(L, [slot], w));
+  const d = db(c);
+  await writeAll(c, [
+    ...daySlots.filter((s) => s.position >= position).map((s) => d.update(schema.mesoSlots).set({ position: s.position + 1 }).where(eq(schema.mesoSlots.id, s.id))),
+    d.insert(schema.mesoSlots).values(slot),
+    ...chunk(sets).map((r) => d.insert(schema.mesoSets).values(r)),
+  ]);
+  return { ok: true as const, slot: { slotId: slot.id, day: day.position, position, muscle, exerciseName: ex.name }, weeksPlanned: weeks.sort((a, b) => a - b) };
+}
+
+/**
+ * Remove an exercise from its day for the whole mesocycle, sets and all (a
+ * finished session's workout keeps what was logged). A day's only exercise
+ * can't go; delete the day instead.
+ */
+export async function deleteSlotForUser(c: Env, email: string, slotId: string) {
+  const slot = (await db(c).select().from(schema.mesoSlots).where(and(eq(schema.mesoSlots.id, slotId), eq(schema.mesoSlots.userEmail, email))).limit(1))[0];
+  if (!slot) return { error: "no slot with that id" };
+  const L = await loadActiveMeso(c, email, slot.mesoId);
+  if ("error" in L) return L;
+  const daySlots = L.slots.filter((s) => s.dayId === slot.dayId);
+  if (daySlots.length <= 1) return { error: "that's the day's only exercise, delete the day instead" };
+  const d = db(c);
+  await d.batch([
+    d.delete(schema.mesoSets).where(eq(schema.mesoSets.slotId, slotId)),
+    d.delete(schema.mesoSlots).where(eq(schema.mesoSlots.id, slotId)),
+    ...daySlots.filter((s) => s.position > slot.position).map((s) => d.update(schema.mesoSlots).set({ position: s.position - 1 }).where(eq(schema.mesoSlots.id, s.id))),
+  ]);
+  return { ok: true as const, deleted: { slotId, muscle: slot.muscle, exerciseName: slot.exerciseName, loggedSets: L.sets.filter((s) => s.slotId === slotId && s.loggedAt).length } };
 }
 
 /** Grounding lines for the agent prompts. */

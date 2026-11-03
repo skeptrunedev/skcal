@@ -15,9 +15,16 @@ import { makeAuth, SMS_ONLY_MESSAGE, smsAllowed, twilioVerify } from "./auth";
 import { trainingRoutes } from "./training-routes";
 import { endPhaseForUser, listPhasesForUser, phaseLine, startPhaseForUser, updatePhaseForUser } from "./phases";
 import {
+  addDayForUser,
+  addSetForUser,
+  addSlotForUser,
   completeSessionForUser,
   createMesocycleForUser,
   currentSessionForUser,
+  deleteDayForUser,
+  deleteMesocycleForUser,
+  deleteSetForUser,
+  deleteSlotForUser,
   getMesocycleForUser,
   getSessionForUser,
   listExercisesForUser,
@@ -26,7 +33,9 @@ import {
   setFeedbackForUser,
   swapExerciseForUser,
   trainingLines,
+  updateDayForUser,
   updateMesocycleForUser,
+  updateSetForUser,
 } from "./training-store";
 import { MUSCLES, TEMPLATES } from "./training-data";
 import { FEEDBACK_SCALES } from "./training";
@@ -2595,7 +2604,7 @@ async function buildCoachSystem(
 }
 
 // Coach rules shared by full and workout-only mode.
-const COACH_TRAINING_RULES = `TRAINING, mesocycles follow Renaissance Periodization: weekly hard sets per muscle start near MEV and climb toward MRV as feedback allows, reps in reserve fall from 3 to 0 across the accumulation weeks, and the last week is a deload. To plan one, ask only what you need (days per week, muscles to prioritize, weeks with the default 5 including deload, equipment limits), then call create_mesocycle with a template or explicit days; list_exercises shows the library. When an active mesocycle exists and the user reports lifting ("bench 185 for 8, 8 and 7", "did 3 sets of curls with 30s"), log it with log_sets against the session instead of log_workout, then say what's left in the session. Every set records when it was finished, which is how rest periods and workout length are measured, so log sets as the user reports them and pass at only for sets they say were done earlier; sets sent together without times count as logged together with unknown rest. Answer rest, pace, and "how much have I done" questions from the session's progress and each set's restS (seconds since the previous set finished, which includes the set itself) via get_training_session, or from meso_sets.logged_at with query_user_data for history. Soreness, pump, joint pain, or how hard a muscle's work felt goes to set_muscle_feedback (map their words to the nearest answer). When they say the workout is done, call complete_session, which logs it as a workout and plans next week's same day. Use get_training_session for "what's my workout today" or targets, swap_exercise when they want a different movement, and end_mesocycle to stop one early.`;
+const COACH_TRAINING_RULES = `TRAINING, mesocycles follow Renaissance Periodization: weekly hard sets per muscle start near MEV and climb toward MRV as feedback allows, reps in reserve fall from 3 to 0 across the accumulation weeks, and the last week is a deload. To plan one, ask only what you need (days per week, muscles to prioritize, weeks with the default 5 including deload, equipment limits), then call create_mesocycle with a template or explicit days; list_exercises shows the library. When an active mesocycle exists and the user reports lifting ("bench 185 for 8, 8 and 7", "did 3 sets of curls with 30s"), log it with log_sets against the session instead of log_workout, then say what's left in the session. Every set records when it was finished, which is how rest periods and workout length are measured, so log sets as the user reports them and pass at only for sets they say were done earlier; sets sent together without times count as logged together with unknown rest. Answer rest, pace, and "how much have I done" questions from the session's progress and each set's restS (seconds since the previous set finished, which includes the set itself) via get_training_session, or from meso_sets.logged_at with query_user_data for history. Soreness, pump, joint pain, or how hard a muscle's work felt goes to set_muscle_feedback (map their words to the nearest answer). When they say the workout is done, call complete_session, which logs it as a workout and plans next week's same day. Use get_training_session for "what's my workout today" or targets, swap_exercise when they want a different movement, and end_mesocycle to stop one early. EDITING THE PLAN, the user can change any part of a mesocycle by asking: get ids from get_training_session (overview true gives every day's id and its exercises' slot ids; a session gives its dayId, slotIds, and set ids). Add a training day with add_training_day, rename or reorder one with update_training_day, and remove one with delete_training_day ("drop leg day", "delete Thursday's workout"). Add an exercise to a day with add_day_exercise and drop one with remove_day_exercise. Fix a logged set ("that was 7 reps not 8") with edit_set, add an extra set with add_set, and remove one with delete_set. Rename the mesocycle or change its notes with update_mesocycle; delete_mesocycle erases it entirely, so use it only when they ask to delete it, not to stop it (that's end_mesocycle).`;
 const COACH_REMINDER_RULES = `REMINDERS, when the user asks to be reminded of something ("remind me to log lunch at noon", "ping me to weigh in on weekday mornings"), create it with set_reminder, and when they correct or adjust one ("no, 9am", "weekdays only") edit it in place with update_reminder using the id from your create result or list_reminders, never create a second one for the same thing. Cancellations use delete_reminder. Reminders DELIVER OVER IMESSAGE, if the tool result says phoneLinked is false, tell the user they won't receive reminder texts until they link their phone in their profile or text the skcal number. If the result says tzDefaulted is true, state the timezone you assumed and ask them to correct it if wrong. After creating one, confirm in plain words what was set, the time and the cadence.`;
 
 // Workout-only mode hides every nutrition, weight, measurement, and phase tool.
@@ -2616,6 +2625,16 @@ const WORKOUT_MODE_TOOLS = new Set([
   "complete_session",
   "swap_exercise",
   "end_mesocycle",
+  "update_mesocycle",
+  "delete_mesocycle",
+  "add_training_day",
+  "update_training_day",
+  "delete_training_day",
+  "add_day_exercise",
+  "remove_day_exercise",
+  "add_set",
+  "edit_set",
+  "delete_set",
 ]);
 const coachToolsFor = (mode: schema.AppMode) =>
   mode === "workout" ? COACH_TOOLS.filter((t) => WORKOUT_MODE_TOOLS.has(t.name)) : COACH_TOOLS;
@@ -3258,6 +3277,139 @@ const COACH_TOOLS: Anthropic.Beta.BetaTool[] = [
     },
   },
   {
+    name: "update_mesocycle",
+    description: "Rename a mesocycle or change its notes; pass only what changes.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Mesocycle id." },
+        name: { type: "string", description: "New name." },
+        notes: { type: "string", description: "New notes; empty clears them." },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "delete_mesocycle",
+    description: "Permanently delete a mesocycle and all its sets (workouts its finished sessions logged stay). Only when the user asks to delete it; end_mesocycle stops one.",
+    input_schema: {
+      type: "object",
+      properties: { id: { type: "string", description: "Mesocycle id." } },
+      required: ["id"],
+    },
+  },
+  {
+    name: "add_training_day",
+    description:
+      "Add a training day (workout) to the active mesocycle's week. Mid-mesocycle it starts in the current week; its exercises start at MEV like a new mesocycle's. Muscles: " +
+      MUSCLES.map((m) => m.key).join(", ") +
+      ".",
+    input_schema: {
+      type: "object",
+      properties: {
+        mesocycle_id: { type: "string", description: "Mesocycle id (default the active one)." },
+        label: { type: "string", description: "Day label, e.g. 'Arms'." },
+        slots: {
+          type: "array",
+          description: "Exercises in order.",
+          items: {
+            type: "object",
+            properties: {
+              muscle: { type: "string", enum: MUSCLES.map((m) => m.key) },
+              exercise: { type: "string", description: "Exercise name or id (optional, default the library's first for the muscle)." },
+            },
+            required: ["muscle"],
+          },
+        },
+        position: { type: "integer", description: "Day number to insert at, 1-based (default last); later days shift down." },
+      },
+      required: ["slots"],
+    },
+  },
+  {
+    name: "update_training_day",
+    description: "Rename a training day or move it to another day number in the week.",
+    input_schema: {
+      type: "object",
+      properties: {
+        day_id: { type: "string", description: "Day id from get_training_session (overview days[].id, or a session's dayId)." },
+        label: { type: "string", description: "New label; empty clears it." },
+        position: { type: "integer", description: "New day number, 1-based." },
+      },
+      required: ["day_id"],
+    },
+  },
+  {
+    name: "delete_training_day",
+    description:
+      "Delete a training day (workout) from the mesocycle: its exercises and every week's sets, feedback, and completions. Workouts its finished sessions logged stay. Later days renumber.",
+    input_schema: {
+      type: "object",
+      properties: { day_id: { type: "string", description: "Day id from get_training_session." } },
+      required: ["day_id"],
+    },
+  },
+  {
+    name: "add_day_exercise",
+    description: "Add an exercise to a training day for the rest of the mesocycle; it gets starting sets in every planned, unfinished week of that day.",
+    input_schema: {
+      type: "object",
+      properties: {
+        day_id: { type: "string", description: "Day id from get_training_session." },
+        muscle: { type: "string", enum: MUSCLES.map((m) => m.key), description: "Muscle (optional when the exercise is named)." },
+        exercise: { type: "string", description: "Exercise name or id (default the library's first unused one for the muscle)." },
+        position: { type: "integer", description: "Order within the day, 1-based (default last)." },
+      },
+      required: ["day_id"],
+    },
+  },
+  {
+    name: "remove_day_exercise",
+    description: "Remove an exercise from its training day for the whole mesocycle, with all its sets.",
+    input_schema: {
+      type: "object",
+      properties: { slot_id: { type: "string", description: "Slot id from get_training_session." } },
+      required: ["slot_id"],
+    },
+  },
+  {
+    name: "add_set",
+    description: "Add a planned set to an exercise in one week, copying the last set's targets.",
+    input_schema: {
+      type: "object",
+      properties: {
+        slot_id: { type: "string", description: "Slot id from get_training_session." },
+        week: { type: "integer", description: "Week (default the next session due)." },
+      },
+      required: ["slot_id"],
+    },
+  },
+  {
+    name: "edit_set",
+    description: "Edit one set (set id from get_training_session): fix logged weight or reps, change its targets, or un-log it with done false. Pass only what changes.",
+    input_schema: {
+      type: "object",
+      properties: {
+        set_id: { type: "string", description: "Set id." },
+        weight_lb: { type: "number", description: "Logged load in pounds." },
+        reps: { type: "integer", description: "Logged reps." },
+        target_weight_lb: { type: "number", description: "Target load in pounds." },
+        target_reps: { type: "integer", description: "Target reps." },
+        done: { type: "boolean", description: "true logs it, false un-logs it (keeps the numbers)." },
+      },
+      required: ["set_id"],
+    },
+  },
+  {
+    name: "delete_set",
+    description: "Delete one set from a session.",
+    input_schema: {
+      type: "object",
+      properties: { set_id: { type: "string", description: "Set id from get_training_session." } },
+      required: ["set_id"],
+    },
+  },
+  {
     name: "list_reminders",
     description: "List the user's reminders (schedule, timezone, enabled state).",
     input_schema: { type: "object", properties: {} },
@@ -3635,6 +3787,58 @@ async function executeCoachTool(
     const id = String(input.id ?? "").trim();
     if (!id) return { error: "id required" };
     return await updateMesocycleForUser(c, email, id, { status: input.status });
+  }
+
+  if (name === "update_mesocycle" || name === "delete_mesocycle") {
+    const id = String(input.id ?? "").trim();
+    if (!id) return { error: "id required" };
+    if (name === "update_mesocycle") return await updateMesocycleForUser(c, email, id, { name: input.name, notes: input.notes });
+    return (await deleteMesocycleForUser(c, email, id)) ? { ok: true, deleted: id } : { error: "no mesocycle with that id" };
+  }
+
+  if (name === "add_training_day") {
+    const mesoId = typeof input.mesocycle_id === "string" && input.mesocycle_id ? input.mesocycle_id : (await listMesocyclesForUser(c, email)).active?.id;
+    if (!mesoId) return { error: "no active mesocycle" };
+    const slots = (Array.isArray(input.slots) ? (input.slots as { muscle?: unknown; exercise?: unknown }[]) : []).map((sl) => ({
+      muscle: sl.muscle,
+      exerciseName: sl.exercise,
+      exerciseId: sl.exercise,
+    }));
+    return await addDayForUser(c, email, mesoId, { label: input.label, slots, position: input.position });
+  }
+
+  if (name === "update_training_day" || name === "delete_training_day" || name === "add_day_exercise") {
+    const dayId = String(input.day_id ?? "").trim();
+    if (!dayId) return { error: "day_id required" };
+    if (name === "update_training_day") return await updateDayForUser(c, email, dayId, { label: input.label, position: input.position });
+    if (name === "delete_training_day") return await deleteDayForUser(c, email, dayId);
+    return await addSlotForUser(c, email, dayId, { muscle: input.muscle, exerciseId: input.exercise, exerciseName: input.exercise, position: input.position });
+  }
+
+  if (name === "remove_day_exercise" || name === "add_set") {
+    const slotId = String(input.slot_id ?? "").trim();
+    if (!slotId) return { error: "slot_id required" };
+    if (name === "remove_day_exercise") return await deleteSlotForUser(c, email, slotId);
+    let week = input.week != null ? Number(input.week) : undefined;
+    if (week == null) {
+      const cur = await currentSessionForUser(c, email);
+      if (!cur.active) return { error: "week required" };
+      week = cur.session.week;
+    }
+    return await addSetForUser(c, email, slotId, week);
+  }
+
+  if (name === "edit_set" || name === "delete_set") {
+    const setId = String(input.set_id ?? "").trim();
+    if (!setId) return { error: "set_id required" };
+    if (name === "delete_set") return (await deleteSetForUser(c, email, setId)) ? { ok: true, deleted: setId } : { error: "no set with that id" };
+    return await updateSetForUser(c, email, setId, {
+      weightLb: input.weight_lb,
+      reps: input.reps,
+      targetWeightLb: input.target_weight_lb,
+      targetReps: input.target_reps,
+      done: input.done,
+    });
   }
 
   if (name === "delete_reminder") {
@@ -6080,7 +6284,7 @@ function buildMcpServer(c: Context<{ Bindings: Bindings; Variables: Variables }>
         inputSchema,
         annotations: readOnly
           ? { readOnlyHint: true, openWorldHint: false }
-          : { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+          : { readOnlyHint: false, destructiveHint: /^(delete|remove)_/.test(tool), idempotentHint: false, openWorldHint: false },
       },
       async (args: Record<string, unknown>) => {
         const result = await executeCoachTool(c, email, tool, args, todayUTC());
@@ -6205,6 +6409,62 @@ function buildMcpServer(c: Context<{ Bindings: Bindings; Variables: Variables }>
   coachTool("end_mesocycle", false, "End a mesocycle", "End the active mesocycle early.", {
     id: z.string().describe("Mesocycle id."),
     status: z.enum(["completed", "abandoned"]),
+  });
+  coachTool("update_mesocycle", false, "Edit a mesocycle", "Rename a mesocycle or change its notes; pass only what changes.", {
+    id: z.string().describe("Mesocycle id."),
+    name: z.string().max(80).optional().describe("New name."),
+    notes: z.string().max(1000).optional().describe("New notes; empty clears them."),
+  });
+  coachTool("delete_mesocycle", false, "Delete a mesocycle", "Permanently delete a mesocycle and all its sets; workouts its finished sessions logged stay.", {
+    id: z.string().describe("Mesocycle id."),
+  });
+  coachTool(
+    "add_training_day",
+    false,
+    "Add a training day",
+    "Add a training day (workout) to the mesocycle's week. Mid-mesocycle it starts in the current week, with sets starting at MEV.",
+    {
+      mesocycle_id: z.string().optional().describe("Mesocycle id (default the active one)."),
+      label: z.string().max(40).optional().describe("Day label."),
+      slots: z.array(z.object({ muscle, exercise: z.string().optional().describe("Exercise name or id.") })).min(1).max(12).describe("Exercises in order."),
+      position: z.number().int().min(1).optional().describe("Day number to insert at (default last)."),
+    },
+  );
+  coachTool("update_training_day", false, "Edit a training day", "Rename a training day or move it to another day number.", {
+    day_id: z.string().describe("Day id from skcal_get_training_session."),
+    label: z.string().max(40).optional().describe("New label; empty clears it."),
+    position: z.number().int().min(1).optional().describe("New day number."),
+  });
+  coachTool(
+    "delete_training_day",
+    false,
+    "Delete a training day",
+    "Delete a training day (workout) from the mesocycle with its exercises and every week's sets; workouts its finished sessions logged stay.",
+    { day_id: z.string().describe("Day id from skcal_get_training_session.") },
+  );
+  coachTool("add_day_exercise", false, "Add an exercise to a day", "Add an exercise to a training day for the rest of the mesocycle.", {
+    day_id: z.string().describe("Day id from skcal_get_training_session."),
+    muscle: muscle.optional().describe("Muscle (optional when the exercise is named)."),
+    exercise: z.string().optional().describe("Exercise name or id."),
+    position: z.number().int().min(1).optional().describe("Order within the day (default last)."),
+  });
+  coachTool("remove_day_exercise", false, "Remove an exercise from a day", "Remove an exercise from its training day for the whole mesocycle, with its sets.", {
+    slot_id: z.string().describe("Slot id from skcal_get_training_session."),
+  });
+  coachTool("add_set", false, "Add a set", "Add a planned set to an exercise in one week, copying the last set's targets.", {
+    slot_id: z.string().describe("Slot id."),
+    week: z.number().int().optional().describe("Week (default the next session due)."),
+  });
+  coachTool("edit_set", false, "Edit a set", "Fix a logged set's weight or reps, change its targets, or un-log it; pass only what changes.", {
+    set_id: z.string().describe("Set id from skcal_get_training_session."),
+    weight_lb: z.number().min(0).optional().describe("Logged load in pounds."),
+    reps: z.number().int().min(0).optional().describe("Logged reps."),
+    target_weight_lb: z.number().min(0).optional().describe("Target load in pounds."),
+    target_reps: z.number().int().min(1).optional().describe("Target reps."),
+    done: z.boolean().optional().describe("true logs it, false un-logs it."),
+  });
+  coachTool("delete_set", false, "Delete a set", "Delete one set from a session.", {
+    set_id: z.string().describe("Set id from skcal_get_training_session."),
   });
 
   return server;

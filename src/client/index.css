@@ -2632,6 +2632,12 @@ a {
   border-color: var(--accent);
   color: var(--accent);
 }
+.train-cal-day:disabled {
+  border-style: dashed;
+  background: transparent;
+  color: var(--dim);
+  cursor: default;
+}
 
 /* weekly sets per muscle vs MEV / MRV */
 .train-vol {
