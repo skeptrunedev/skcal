@@ -3000,6 +3000,15 @@ const COACH_TOOLS: Anthropic.Beta.BetaTool[] = [
     },
   },
   {
+    name: "delete_weigh_in",
+    description: "Delete a logged weigh-in. Get the id from get_weight_history. For cleanup (duplicates, mistakes).",
+    input_schema: {
+      type: "object",
+      properties: { weighInId: { type: "number", description: "Reading id from get_weight_history." } },
+      required: ["weighInId"],
+    },
+  },
+  {
     name: "query_user_data",
     description:
       "Run a read-only SQL SELECT (SQLite) over THIS user's own data when no other tool answers the question, e.g. averages, streaks, comparisons across tables, or anything historical. Only the user's rows are visible; one SELECT (WITH allowed), no comments, no main./temp. prefixes. Returns up to " +
@@ -3015,7 +3024,7 @@ const COACH_TOOLS: Anthropic.Beta.BetaTool[] = [
   {
     name: "get_weight_history",
     description:
-      "Read the user's weigh-in history in POUNDS: first and latest weigh-in with dates, the trend in lb/week (least-squares fit over every reading in the range, so one noisy day doesn't skew it), total change, weekly averages, and the readings themselves. Use it for questions like 'how much am I losing per week', 'when was my first weigh-in', or 'what did I weigh in March'. Omit from/to for all history.",
+      "Read the user's weigh-in history in POUNDS: first and latest weigh-in with dates, the trend in lb/week (least-squares fit over every reading in the range, so one noisy day doesn't skew it), total change, weekly averages, and the readings themselves. Use it for questions like 'how much am I losing per week', 'when was my first weigh-in', or 'what did I weigh in March'. Omit from/to for all history. Readings carry the id delete_weigh_in needs, unless readingsAreDailyAverages is true; then narrow from/to to get them.",
     input_schema: {
       type: "object",
       properties: {
@@ -3647,6 +3656,16 @@ async function executeCoachTool(
     return { ok: true, loggedPounds: pounds };
   }
 
+  if (name === "delete_weigh_in") {
+    const id = Number(input.weighInId);
+    if (!Number.isFinite(id)) return { error: "weighInId required" };
+    const [row] = await db(c)
+      .delete(schema.weightReadings)
+      .where(and(eq(schema.weightReadings.id, id), eq(schema.weightReadings.userEmail, email)))
+      .returning();
+    return row ? { ok: true, deleted: id, pounds: Number(kgToLb(row.weightKg).toFixed(1)) } : { error: "no weigh-in with that id" };
+  }
+
   if (name === "query_user_data") {
     return queryUserData(c, email, String(input.sql ?? ""));
   }
@@ -4048,7 +4067,7 @@ app.post("/api/agent/stream", async (c) => {
     (await buildCoachSystem(c, email, today, tzMin, mode)) +
     (mode === "workout"
       ? `\n\nLOGGING JUDGMENT, log immediately when the user states a workout they did, calling the log tool straight away; after logging, reply in one or two short sentences saying what you logged, and add advice only if the user asked for it. When the user sends a PHOTO of a workout screenshot or whiteboard, log it with log_workout. Tools: log workouts from the user's plain description with log_workout (pass their words through); for questions about their past training that no tool covers (volume, streaks, PRs, trends), write a read-only query with query_user_data rather than guessing; save durable user preferences/facts with remember and remove wrong ones with forget_memory. ${COACH_TRAINING_RULES} When the user states a lasting preference (hates lunges, bad shoulder, trains at home), SAVE it, and never program around saved memories. ${COACH_REMINDER_RULES} Today's date is ${today}. IMPORTANT: while calling tools, do NOT write any prose, just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed. Never repeat that confirmation.`
-      : `\n\nLOGGING JUDGMENT, log immediately when the user states something that happened (a meal eaten, a weigh-in, a workout done), calling the log tool straight away without first checking the log; after logging, reply in one or two short sentences, what you logged with its kcal and protein, then today's total and what's left, and add advice only if the user asked for it; when the conversation is exploratory ("should I eat", "what if", "how many calories are in"), answer first and ask before logging. When the user sends a PHOTO, look at it, food -> describe what you see and log it with log_meal, scale readout -> log_weight, workout screenshot -> log_workout, tape measure -> log_measurement. Tools: you can log meals with log_meal; view and reorganize the food log with list_food_log, move_meal, and move_food_item; clean up mistakes and duplicates with delete_meal and delete_food_item, and when the user corrects an entry ("that was actually 600 kcal", "it was two scoops") fix it in place with edit_food_item instead of deleting and relogging; record body measurements with log_measurement (inches); record weigh-ins with log_weight (pounds); answer questions about weight history (first weigh-in, lb lost per week, what they weighed on a date) with get_weight_history instead of guessing from the summary above; for any other question about their past data that no tool covers (averages, streaks, trends across meals, workouts or measurements), write a read-only query with query_user_data rather than guessing; log workouts from the user's plain description with log_workout (pass their words through); save durable user preferences/facts with remember and remove wrong ones with forget_memory; update daily calorie and protein targets with set_targets. When the user describes their day to day activity, a new job, a change in training volume, or a big lifestyle change, recompute their daily calorie target with Mifflin-St Jeor from the height, sex, and latest weigh-in in the context above, scaled by the closest activity multiplier, 1.2 sedentary, 1.375 lightly active, 1.55 moderately active, 1.725 very active, 1.9 athlete, then apply the deficit or surplus their current goal implies, state the new daily calorie and protein numbers plainly, and call set_targets with them, passing their activity in a few words. GOAL PHASES, when the user starts a bulk, cut, or maintenance block ("starting a lean bulk", "time to cut till March"), call start_phase (it closes the open phase and writes the targets); typical rates are a bulk at +0.25 to +0.5% bodyweight per week and a cut at -0.5 to -1% per week, so pick from those unless they give one. If the result's kcalSource is unchanged there wasn't enough logged data to estimate maintenance, so compute it with Mifflin-St Jeor as below, add the rate's surplus or deficit (kg per week x 7700 / 7 kcal per day), and call update_phase with daily_kcal. Adjust a phase with update_phase and close it with end_phase; answer "am I gaining too fast" from the GOAL PHASE line or get_phases. ${COACH_TRAINING_RULES} When the user states a lasting preference (dislikes yogurt, vegetarian, allergic to nuts), SAVE it — and never suggest foods that conflict with saved memories. ${COACH_REMINDER_RULES} Today's date is ${today}. To move / re-date / fix which day food was logged on, first call list_food_log for the relevant day to find the exact meal or item, then move it. IMPORTANT: while calling tools, do NOT write any prose — just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed (item + from day → to day). Never repeat that confirmation.`) +
+      : `\n\nLOGGING JUDGMENT, log immediately when the user states something that happened (a meal eaten, a weigh-in, a workout done), calling the log tool straight away without first checking the log; after logging, reply in one or two short sentences, what you logged with its kcal and protein, then today's total and what's left, and add advice only if the user asked for it; when the conversation is exploratory ("should I eat", "what if", "how many calories are in"), answer first and ask before logging. When the user sends a PHOTO, look at it, food -> describe what you see and log it with log_meal, scale readout -> log_weight, workout screenshot -> log_workout, tape measure -> log_measurement. Tools: you can log meals with log_meal; view and reorganize the food log with list_food_log, move_meal, and move_food_item; clean up mistakes and duplicates with delete_meal and delete_food_item, and when the user corrects an entry ("that was actually 600 kcal", "it was two scoops") fix it in place with edit_food_item instead of deleting and relogging; record body measurements with log_measurement (inches); record weigh-ins with log_weight (pounds); remove a wrong or duplicate weigh-in with delete_weigh_in, finding its id with get_weight_history; answer questions about weight history (first weigh-in, lb lost per week, what they weighed on a date) with get_weight_history instead of guessing from the summary above; for any other question about their past data that no tool covers (averages, streaks, trends across meals, workouts or measurements), write a read-only query with query_user_data rather than guessing; log workouts from the user's plain description with log_workout (pass their words through); save durable user preferences/facts with remember and remove wrong ones with forget_memory; update daily calorie and protein targets with set_targets. When the user describes their day to day activity, a new job, a change in training volume, or a big lifestyle change, recompute their daily calorie target with Mifflin-St Jeor from the height, sex, and latest weigh-in in the context above, scaled by the closest activity multiplier, 1.2 sedentary, 1.375 lightly active, 1.55 moderately active, 1.725 very active, 1.9 athlete, then apply the deficit or surplus their current goal implies, state the new daily calorie and protein numbers plainly, and call set_targets with them, passing their activity in a few words. GOAL PHASES, when the user starts a bulk, cut, or maintenance block ("starting a lean bulk", "time to cut till March"), call start_phase (it closes the open phase and writes the targets); typical rates are a bulk at +0.25 to +0.5% bodyweight per week and a cut at -0.5 to -1% per week, so pick from those unless they give one. If the result's kcalSource is unchanged there wasn't enough logged data to estimate maintenance, so compute it with Mifflin-St Jeor as below, add the rate's surplus or deficit (kg per week x 7700 / 7 kcal per day), and call update_phase with daily_kcal. Adjust a phase with update_phase and close it with end_phase; answer "am I gaining too fast" from the GOAL PHASE line or get_phases. ${COACH_TRAINING_RULES} When the user states a lasting preference (dislikes yogurt, vegetarian, allergic to nuts), SAVE it — and never suggest foods that conflict with saved memories. ${COACH_REMINDER_RULES} Today's date is ${today}. To move / re-date / fix which day food was logged on, first call list_food_log for the relevant day to find the exact meal or item, then move it. IMPORTANT: while calling tools, do NOT write any prose — just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed (item + from day → to day). Never repeat that confirmation.`) +
     (await onboardingRules(c, email));
 
   const encoder = new TextEncoder();
@@ -6414,6 +6433,9 @@ function buildMcpServer(c: Context<{ Bindings: Bindings; Variables: Variables }>
   const muscle = z.enum(MUSCLES.map((m) => m.key) as [string, ...string[]]);
   const dayArg = z.string().optional().describe("YYYY-MM-DD or 'today'.");
 
+  coachTool("delete_weigh_in", false, "Delete a weigh-in", "Permanently delete a logged weigh-in. Get the id from skcal_list_weigh_ins.", {
+    weighInId: z.number().int().describe("Weigh-in id from skcal_list_weigh_ins."),
+  });
   coachTool("set_profile", false, "Save body profile", "Save the user's height, sex, and/or age, used for calorie math. Pass only what they gave.", {
     height_in: z.number().min(36).max(96).optional().describe("Height in inches."),
     sex: z.enum(["male", "female", "other"]).optional(),

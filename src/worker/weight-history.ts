@@ -6,6 +6,7 @@ const LB_PER_KG = 2.2046226218;
 const MAX_READINGS = 120;
 
 export interface WeightRow {
+  id: number;
   ts: Date;
   weightKg: number;
   bodyFatPct: number | null;
@@ -23,7 +24,7 @@ export function summarizeWeightHistory(all: WeightRow[], from: string | null, to
   const localDay = (t: Date) => new Date(t.getTime() - tzMin * 60_000).toISOString().slice(0, 10);
   const round1 = (n: number) => Math.round(n * 10) / 10;
   const rows = all
-    .map((r) => ({ day: localDay(r.ts), t: r.ts.getTime(), lb: r.weightKg * LB_PER_KG, bodyFatPct: r.bodyFatPct, note: r.note }))
+    .map((r) => ({ id: r.id, day: localDay(r.ts), t: r.ts.getTime(), lb: r.weightKg * LB_PER_KG, bodyFatPct: r.bodyFatPct, note: r.note }))
     .filter((r) => (from == null || r.day >= from) && r.day <= to);
   if (!rows.length) return { count: 0, message: all.length ? "no weigh-ins in that range" : "no weigh-ins logged yet" };
 
@@ -54,9 +55,9 @@ export function summarizeWeightHistory(all: WeightRow[], from: string | null, to
   const weeklyAverages = [...weeks.entries()].map(([weekOf, w]) => ({ weekOf, avgPounds: round1(w.sum / w.n), weighIns: w.n }));
 
   // Every reading when it fits, otherwise one averaged reading per day (newest days kept).
-  let readings: { date: string; pounds: number; bodyFatPct?: number | null; note?: string | null; weighIns?: number }[];
+  let readings: { id?: number; date: string; pounds: number; bodyFatPct?: number | null; note?: string | null; weighIns?: number }[];
   if (rows.length <= MAX_READINGS) {
-    readings = rows.map((r) => ({ date: r.day, pounds: round1(r.lb), bodyFatPct: r.bodyFatPct, note: r.note }));
+    readings = rows.map((r) => ({ id: r.id, date: r.day, pounds: round1(r.lb), bodyFatPct: r.bodyFatPct, note: r.note }));
   } else {
     const byDay = new Map<string, { sum: number; n: number }>();
     for (const r of rows) {

@@ -4,7 +4,7 @@ import { summarizeWeightHistory, type WeightRow } from "../src/worker/weight-his
 const LB_PER_KG = 2.2046226218;
 const day = (iso: string, hourUtc = 15) => new Date(`${iso}T${String(hourUtc).padStart(2, "0")}:00:00Z`);
 const lb = (pounds: number) => pounds / LB_PER_KG;
-const row = (ts: Date, pounds: number): WeightRow => ({ ts, weightKg: lb(pounds), bodyFatPct: null, note: null });
+const row = (ts: Date, pounds: number): WeightRow => ({ id: 1, ts, weightKg: lb(pounds), bodyFatPct: null, note: null });
 
 // 8 weeks losing exactly 1 lb/week, weighed daily, with ±1.5 lb of water noise.
 const rows: WeightRow[] = [];

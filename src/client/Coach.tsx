@@ -119,6 +119,7 @@ const TOOL_LABELS: Record<string, string> = {
   move_food_item: "Moving food",
   delete_meal: "Deleting meal",
   delete_food_item: "Deleting food",
+  delete_weigh_in: "Deleting weigh-in",
   edit_food_item: "Fixing entry",
   log_meal: "Logging meal",
   log_measurement: "Logging measurement",

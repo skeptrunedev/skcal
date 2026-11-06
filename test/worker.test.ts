@@ -425,3 +425,51 @@ describe("per-user isolation", () => {
     expect(bRows.some((r) => r.weightKg === 99.9 || r.note === "A-only")).toBe(false);
   });
 });
+
+const OWNER = "owner@example.com";
+const OTHER = "other@example.com";
+
+async function seedMcpToken(email: string): Promise<string> {
+  const db = await (await getMiniflare()).getD1Database("DB");
+  const now = Date.now();
+  await db
+    .prepare("INSERT INTO user (id, name, email, created_at, updated_at) VALUES (?1, ?1, ?2, ?3, ?3)")
+    .bind(`user-${email}`, email, now)
+    .run();
+  const token = `token-${email}`;
+  await db
+    .prepare(
+      "INSERT INTO oauth_access_token (id, access_token, access_token_expires_at, client_id, user_id, created_at, updated_at)" +
+        " VALUES (?1, ?1, ?2, 'test-client', ?3, ?4, ?4)",
+    )
+    .bind(token, now + 3_600_000, `user-${email}`, now)
+    .run();
+  return token;
+}
+
+async function deleteOverMcp(token: string, weighInId: number) {
+  const res = await workerFetch("/mcp", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "skcal_delete_weigh_in", arguments: { weighInId } } }),
+  });
+  return res.text();
+}
+
+const weighIns = async (email: string) => (await (await asUser(email, "/api/weight")).json()) as { id: number; weightKg: number }[];
+
+describe("skcal_delete_weigh_in", () => {
+  it("deletes the caller's weigh-in and can't reach another account's", async () => {
+    const token = await seedMcpToken(OWNER);
+    await jsonPost(OWNER, "/api/weight", { weightKg: 80 });
+    await jsonPost(OTHER, "/api/weight", { weightKg: 70 });
+    const [mine] = await weighIns(OWNER);
+    const [theirs] = await weighIns(OTHER);
+
+    expect(await deleteOverMcp(token, theirs.id)).toContain("no weigh-in with that id");
+    expect(await weighIns(OTHER)).toHaveLength(1);
+
+    expect(await deleteOverMcp(token, mine.id)).toContain(`\\"deleted\\": ${mine.id}`);
+    expect(await weighIns(OWNER)).toHaveLength(0);
+  });
+});
