@@ -287,6 +287,55 @@ describe("training API: timing", () => {
   });
 });
 
+describe("training API: reopening a finished session", () => {
+  const user = "reopen@example.com";
+
+  it("removes the logged workout, keeps the sets, and lets the session be finished again", async () => {
+    const created = await as(user, "/api/training/mesocycles", { method: "POST", body: JSON.stringify({ template: "full_body_3", weeks: 4 }) });
+    const mesoId = (await json<{ mesocycle: { id: string } }>(created)).mesocycle.id;
+    const url = (action: string) => `/api/training/mesocycles/${mesoId}/sessions/1/1/${action}`;
+    const today = new Date().toISOString().slice(0, 10);
+    const strength = async () =>
+      (await json<{ summary: string; activityType: string }[]>(await as(user, `/api/workouts?date=${today}`))).filter(
+        (w) => w.activityType === "strength_training" && w.summary.includes("week 1 day 1"),
+      );
+
+    expect((await as(user, url("uncomplete"), { method: "POST" })).status).toBe(400); // not complete yet
+
+    await as(user, "/api/training/log", { method: "POST", body: JSON.stringify({ exercise: "bench", sets: [{ weight_lb: 135, reps: 10 }] }) });
+    expect((await as(user, url("complete"), { method: "POST" })).status).toBe(200);
+    expect(await strength()).toHaveLength(1);
+
+    const reopened = await as(user, url("uncomplete"), { method: "POST" });
+    expect(reopened.status).toBe(200);
+    expect(await json<{ next: { week: number; day: number } }>(reopened)).toMatchObject({ ok: true, next: { week: 1, day: 1 }, mesoReopened: false });
+    expect(await strength()).toHaveLength(0);
+
+    const session = await json<{ completed: boolean; progress: { setsDone: number } }>(await as(user, `/api/training/mesocycles/${mesoId}/sessions/1/1`));
+    expect(session.completed).toBe(false);
+    expect(session.progress.setsDone).toBe(1);
+
+    // Finishing again works and logs exactly one workout.
+    expect((await as(user, url("complete"), { method: "POST" })).status).toBe(200);
+    expect(await strength()).toHaveLength(1);
+
+    expect((await as("someone-else@example.com", url("uncomplete"), { method: "POST" })).status).toBe(404);
+  });
+
+  it("reactivates a mesocycle that only finished because of this session", async () => {
+    const created = await as("reopen-meso@example.com", "/api/training/mesocycles", { method: "POST", body: JSON.stringify({ template: "full_body_3", weeks: 4 }) });
+    const mesoId = (await json<{ mesocycle: { id: string } }>(created)).mesocycle.id;
+    const u = "reopen-meso@example.com";
+    for (let week = 1; week <= 4; week++)
+      for (const day of [1, 2, 3]) expect((await as(u, `/api/training/mesocycles/${mesoId}/sessions/${week}/${day}/complete`, { method: "POST" })).status).toBe(200);
+    expect((await json<{ active: boolean }>(await as(u, "/api/training/current"))).active).toBe(false);
+
+    const r = await as(u, `/api/training/mesocycles/${mesoId}/sessions/4/3/uncomplete`, { method: "POST" });
+    expect(await json<{ mesoReopened: boolean; next: { week: number; day: number } }>(r)).toMatchObject({ mesoReopened: true, next: { week: 4, day: 3 } });
+    expect((await json<{ active: boolean }>(await as(u, "/api/training/current"))).active).toBe(true);
+  });
+});
+
 describe("training API: editing the plan", () => {
   const user = "planner@example.com";
   type Detail = {

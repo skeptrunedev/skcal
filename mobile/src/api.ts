@@ -730,6 +730,11 @@ export const completeSession = (mesoId: string, week: number, day: number) =>
     `/api/training/mesocycles/${mesoId}/sessions/${week}/${day}/complete`,
     "POST",
   );
+export const uncompleteSession = (mesoId: string, week: number, day: number) =>
+  call<{ ok: true; next: { week: number; day: number; label: string | null } | null; mesoReopened: boolean }>(
+    `/api/training/mesocycles/${mesoId}/sessions/${week}/${day}/uncomplete`,
+    "POST",
+  );
 export const setFeedback = (mesoId: string, input: Partial<MuscleFeedback> & { week: number; day: number; muscle: string }) =>
   call<{ ok: true }>(`/api/training/mesocycles/${mesoId}/feedback`, "PUT", input);
 export const updateSet = (id: string, patch: { weightLb?: number | null; reps?: number | null; done?: boolean }) =>

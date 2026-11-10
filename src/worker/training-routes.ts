@@ -9,6 +9,7 @@ import {
   addSetForUser,
   addSlotForUser,
   completeSessionForUser,
+  uncompleteSessionForUser,
   createExerciseForUser,
   createMesocycleForUser,
   currentSessionForUser,
@@ -1150,6 +1151,38 @@ app.get("/api/training/mesocycles/:id/sessions/:week/:day", async (c) => {
 app.post("/api/training/mesocycles/:id/sessions/:week/:day/complete", async (c) => {
   const b = await body<{ at?: unknown }>(c);
   const r = await completeSessionForUser(c, c.get("email"), c.req.param("id"), Number(c.req.param("week")), Number(c.req.param("day")), b.at);
+  return reply(c, r);
+});
+
+/**
+ * @openapi
+ * /api/training/mesocycles/{id}/sessions/{week}/{day}/uncomplete:
+ *   post:
+ *     tags: [Training]
+ *     summary: Reopen a finished session
+ *     description: >-
+ *       Undoes finishing a session: the session is open again and the strength workout it added to
+ *       the workout history is removed. Logged sets and feedback are kept. A mesocycle that
+ *       completed because of this session becomes active again.
+ *     operationId: uncompleteSession
+ *     parameters:
+ *       - $ref: '#/components/parameters/TrainingId'
+ *       - $ref: '#/components/parameters/Week'
+ *       - $ref: '#/components/parameters/Day'
+ *     responses:
+ *       '200':
+ *         description: The session was reopened.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TrainingResult'
+ *       '400':
+ *         $ref: '#/components/responses/BadRequest'
+ *       '404':
+ *         $ref: '#/components/responses/NotFound'
+ */
+app.post("/api/training/mesocycles/:id/sessions/:week/:day/uncomplete", async (c) => {
+  const r = await uncompleteSessionForUser(c, c.get("email"), c.req.param("id"), Number(c.req.param("week")), Number(c.req.param("day")));
   return reply(c, r);
 });
 

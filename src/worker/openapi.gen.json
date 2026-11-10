@@ -1743,6 +1743,45 @@
         }
       }
     },
+    "/api/training/mesocycles/{id}/sessions/{week}/{day}/uncomplete": {
+      "post": {
+        "tags": [
+          "Training"
+        ],
+        "summary": "Reopen a finished session",
+        "description": "Undoes finishing a session: the session is open again and the strength workout it added to the workout history is removed. Logged sets and feedback are kept. A mesocycle that completed because of this session becomes active again.",
+        "operationId": "uncompleteSession",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TrainingId"
+          },
+          {
+            "$ref": "#/components/parameters/Week"
+          },
+          {
+            "$ref": "#/components/parameters/Day"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session was reopened.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/training/mesocycles/{id}/feedback": {
       "put": {
         "tags": [

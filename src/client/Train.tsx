@@ -143,6 +143,19 @@ function SessionView({
     }
   }
 
+  async function reopen() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.uncompleteSession(s.meso.id, s.week, s.day);
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <section className="card train-head">
@@ -198,7 +211,12 @@ function SessionView({
           {busy ? "Saving…" : p.setsDone < p.setsPlanned ? `Finish workout · ${p.setsPlanned - p.setsDone} sets unlogged` : "Finish workout"}
         </button>
       ) : (
-        <p className="meta train-done">Completed{s.completedAt ? ` ${new Date(s.completedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}</p>
+        <>
+          <p className="meta train-done">Completed{s.completedAt ? ` ${new Date(s.completedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}</p>
+          <button className="btn ghost" onClick={reopen} disabled={busy}>
+            {busy ? "Saving…" : "Mark as not completed"}
+          </button>
+        </>
       )}
 
       {ask && (

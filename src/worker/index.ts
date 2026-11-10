@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { summarizeWeightHistory } from "./weight-history";
-import { buildUserQuery, USER_SQL_MAX_ROWS, USER_SQL_SCHEMA } from "./user-sql";
+import { buildUserQuery, buildUserWrite, USER_SQL_MAX_ROWS, USER_SQL_SCHEMA, USER_SQL_WRITE_RULES } from "./user-sql";
 import { cachedTools, claudeCreate, claudeStream, isFastModeRateLimit, logClaudeUsage } from "./claude";
 import { and, asc, desc, eq, gte, inArray, like, lt } from "drizzle-orm";
 import Anthropic from "@anthropic-ai/sdk";
@@ -19,6 +19,7 @@ import {
   addSetForUser,
   addSlotForUser,
   completeSessionForUser,
+  uncompleteSessionForUser,
   createMesocycleForUser,
   currentSessionForUser,
   deleteDayForUser,
@@ -2635,12 +2636,13 @@ async function onboardingRules(c: EnvCtx, email: string): Promise<string> {
 }
 
 // Coach rules shared by full and workout-only mode.
-const COACH_TRAINING_RULES = `TRAINING, mesocycles follow Renaissance Periodization: weekly hard sets per muscle start near MEV and climb toward MRV as feedback allows, reps in reserve fall from 3 to 0 across the accumulation weeks, and the last week is a deload. To plan one, ask only what you need (days per week, muscles to prioritize, weeks with the default 5 including deload, equipment limits), then call create_mesocycle with a template or explicit days; list_exercises shows the library. When an active mesocycle exists and the user reports lifting ("bench 185 for 8, 8 and 7", "did 3 sets of curls with 30s"), log it with log_sets against the session instead of log_workout, then say what's left in the session. Every set records when it was finished, which is how rest periods and workout length are measured, so log sets as the user reports them and pass at only for sets they say were done earlier; sets sent together without times count as logged together with unknown rest. Answer rest, pace, and "how much have I done" questions from the session's progress and each set's restS (seconds since the previous set finished, which includes the set itself) via get_training_session, or from meso_sets.logged_at with query_user_data for history. Soreness, pump, joint pain, or how hard a muscle's work felt goes to set_muscle_feedback (map their words to the nearest answer). When they say the workout is done, call complete_session, which logs it as a workout and plans next week's same day. Use get_training_session for "what's my workout today" or targets, swap_exercise when they want a different movement, and end_mesocycle to stop one early. EDITING THE PLAN, the user can change any part of a mesocycle by asking: get ids from get_training_session (overview true gives every day's id and its exercises' slot ids; a session gives its dayId, slotIds, and set ids). Add a training day with add_training_day, rename or reorder one with update_training_day, and remove one with delete_training_day ("drop leg day", "delete Thursday's workout"). Add an exercise to a day with add_day_exercise and drop one with remove_day_exercise. Fix a logged set ("that was 7 reps not 8") with edit_set, add an extra set with add_set, and remove one with delete_set. Rename the mesocycle or change its notes with update_mesocycle; delete_mesocycle erases it entirely, so use it only when they ask to delete it, not to stop it (that's end_mesocycle).`;
+const COACH_TRAINING_RULES = `TRAINING, mesocycles follow Renaissance Periodization: weekly hard sets per muscle start near MEV and climb toward MRV as feedback allows, reps in reserve fall from 3 to 0 across the accumulation weeks, and the last week is a deload. To plan one, ask only what you need (days per week, muscles to prioritize, weeks with the default 5 including deload, equipment limits), then call create_mesocycle with a template or explicit days; list_exercises shows the library. When an active mesocycle exists and the user reports lifting ("bench 185 for 8, 8 and 7", "did 3 sets of curls with 30s"), log it with log_sets against the session instead of log_workout, then say what's left in the session. Every set records when it was finished, which is how rest periods and workout length are measured, so log sets as the user reports them and pass at only for sets they say were done earlier; sets sent together without times count as logged together with unknown rest. Answer rest, pace, and "how much have I done" questions from the session's progress and each set's restS (seconds since the previous set finished, which includes the set itself) via get_training_session, or from meso_sets.logged_at with query_user_data for history. Soreness, pump, joint pain, or how hard a muscle's work felt goes to set_muscle_feedback (map their words to the nearest answer). When they say the workout is done, call complete_session, which logs it as a workout and plans next week's same day; when a session was finished by mistake or they want it reopened, call uncomplete_session with its week and day, which removes the workout it logged. Use get_training_session for "what's my workout today" or targets, swap_exercise when they want a different movement, and end_mesocycle to stop one early. EDITING THE PLAN, the user can change any part of a mesocycle by asking: get ids from get_training_session (overview true gives every day's id and its exercises' slot ids; a session gives its dayId, slotIds, and set ids). Add a training day with add_training_day, rename or reorder one with update_training_day, and remove one with delete_training_day ("drop leg day", "delete Thursday's workout"). Add an exercise to a day with add_day_exercise and drop one with remove_day_exercise. Fix a logged set ("that was 7 reps not 8") with edit_set, add an extra set with add_set, and remove one with delete_set. Rename the mesocycle or change its notes with update_mesocycle; delete_mesocycle erases it entirely, so use it only when they ask to delete it, not to stop it (that's end_mesocycle).`;
 const COACH_REMINDER_RULES = `REMINDERS, when the user asks to be reminded of something ("remind me to log lunch at noon", "ping me to weigh in on weekday mornings"), create it with set_reminder, and when they correct or adjust one ("no, 9am", "weekdays only") edit it in place with update_reminder using the id from your create result or list_reminders, never create a second one for the same thing. Cancellations use delete_reminder. Reminders DELIVER OVER IMESSAGE, if the tool result says phoneLinked is false, tell the user they won't receive reminder texts until they link their phone in their profile or text the skcal number. If the result says tzDefaulted is true, state the timezone you assumed and ask them to correct it if wrong. After creating one, confirm in plain words what was set, the time and the cadence.`;
 
 // Workout-only mode hides every nutrition, weight, measurement, and phase tool.
 const WORKOUT_MODE_TOOLS = new Set([
   "query_user_data",
+  "execute_user_sql",
   "log_workout",
   "remember",
   "forget_memory",
@@ -2654,6 +2656,7 @@ const WORKOUT_MODE_TOOLS = new Set([
   "log_sets",
   "set_muscle_feedback",
   "complete_session",
+  "uncomplete_session",
   "swap_exercise",
   "end_mesocycle",
   "update_mesocycle",
@@ -3022,6 +3025,17 @@ const COACH_TOOLS: Anthropic.Beta.BetaTool[] = [
     },
   },
   {
+    name: "execute_user_sql",
+    description:
+      "Run one INSERT, UPDATE or DELETE (SQLite) on THIS user's own rows when no dedicated tool can make the change, e.g. fixing or backfilling many rows at once, or data no other tool edits. Use query_user_data first to look at the rows and check what you changed afterwards. Prefer a dedicated tool when one exists, and confirm with the user before a bulk or irreversible change such as deleting many rows. Returns rowsAffected (and the rows if you add RETURNING). Same tables and units as query_user_data.\n" +
+      USER_SQL_WRITE_RULES,
+    input_schema: {
+      type: "object",
+      properties: { sql: { type: "string", description: "A single INSERT, UPDATE or DELETE statement." } },
+      required: ["sql"],
+    },
+  },
+  {
     name: "get_weight_history",
     description:
       "Read the user's weigh-in history in POUNDS: first and latest weigh-in with dates, the trend in lb/week (least-squares fit over every reading in the range, so one noisy day doesn't skew it), total change, weekly averages, and the readings themselves. Use it for questions like 'how much am I losing per week', 'when was my first weigh-in', or 'what did I weigh in March'. Omit from/to for all history. Readings carry the id delete_weigh_in needs, unless readingsAreDailyAverages is true; then narrow from/to to get them.",
@@ -3326,6 +3340,20 @@ const COACH_TOOLS: Anthropic.Beta.BetaTool[] = [
     },
   },
   {
+    name: "uncomplete_session",
+    description:
+      "Reopen a finished training session (finished by mistake, or the user wants to keep going): removes the workout it logged and marks the session not done. Logged sets and feedback are kept.",
+    input_schema: {
+      type: "object",
+      properties: {
+        week: { type: "integer", description: "Week of the finished session." },
+        day: { type: "integer", description: "Day of the finished session." },
+        mesocycle_id: { type: "string", description: "Only when it isn't the active (or latest) mesocycle." },
+      },
+      required: ["week", "day"],
+    },
+  },
+  {
     name: "swap_exercise",
     description: "Replace a slot's exercise for the rest of the mesocycle (slot_id from get_training_session).",
     input_schema: {
@@ -3541,6 +3569,23 @@ async function queryUserData(c: Context<{ Bindings: Bindings; Variables: Variabl
   }
 }
 
+// Writes to one user's rows for the coach's execute_user_sql tool; ./user-sql
+// rewrites the statement so it can only touch the caller's own rows.
+async function executeUserSql(c: Context<{ Bindings: Bindings; Variables: Variables }>, email: string, userSql: string) {
+  userSqlTables ??= (
+    await c.env.DB.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')").all<{ name: string }>()
+  ).results.map((r) => r.name);
+  const built = buildUserWrite(userSql, userSqlTables);
+  if ("error" in built) return { error: built.error };
+  try {
+    const { results, meta } = await c.env.DB.prepare(built.sql).bind(email).all<Record<string, unknown>>();
+    const rows = results.slice(0, USER_SQL_MAX_ROWS);
+    return { ok: true as const, rowsAffected: meta.changes, ...(rows.length ? { rows, truncated: results.length > rows.length } : {}) };
+  } catch (e) {
+    return { error: `statement failed (nothing was changed): ${String(e).replace(/^Error:\s*/, "").slice(0, 300)}` };
+  }
+}
+
 async function executeCoachTool(
   c: Context<{ Bindings: Bindings; Variables: Variables }>,
   email: string,
@@ -3668,6 +3713,10 @@ async function executeCoachTool(
 
   if (name === "query_user_data") {
     return queryUserData(c, email, String(input.sql ?? ""));
+  }
+
+  if (name === "execute_user_sql") {
+    return executeUserSql(c, email, String(input.sql ?? ""));
   }
 
   if (name === "get_weight_history") {
@@ -3842,6 +3891,15 @@ async function executeCoachTool(
   }
 
   if (name === "log_sets") return await logSetsForUser(c, email, { exercise: input.exercise, sets: input.sets, week: input.week, day: input.day });
+
+  if (name === "uncomplete_session") {
+    if (input.week == null || input.day == null) return { error: "give the week and day of the session to reopen (the overview from get_training_session shows which are done)" };
+    // Default to the active mesocycle, else the latest one: finishing the last session completes it.
+    const list = await listMesocyclesForUser(c, email);
+    const mesoId = typeof input.mesocycle_id === "string" && input.mesocycle_id ? input.mesocycle_id : (list.active ?? list.mesocycles[0])?.id;
+    if (!mesoId) return { error: "no mesocycle" };
+    return await uncompleteSessionForUser(c, email, mesoId, Number(input.week), Number(input.day));
+  }
 
   if (name === "set_muscle_feedback" || name === "complete_session") {
     const cur = await currentSessionForUser(c, email);
@@ -4066,8 +4124,8 @@ app.post("/api/agent/stream", async (c) => {
   const system =
     (await buildCoachSystem(c, email, today, tzMin, mode)) +
     (mode === "workout"
-      ? `\n\nLOGGING JUDGMENT, log immediately when the user states a workout they did, calling the log tool straight away; after logging, reply in one or two short sentences saying what you logged, and add advice only if the user asked for it. When the user sends a PHOTO of a workout screenshot or whiteboard, log it with log_workout. Tools: log workouts from the user's plain description with log_workout (pass their words through); for questions about their past training that no tool covers (volume, streaks, PRs, trends), write a read-only query with query_user_data rather than guessing; save durable user preferences/facts with remember and remove wrong ones with forget_memory. ${COACH_TRAINING_RULES} When the user states a lasting preference (hates lunges, bad shoulder, trains at home), SAVE it, and never program around saved memories. ${COACH_REMINDER_RULES} Today's date is ${today}. IMPORTANT: while calling tools, do NOT write any prose, just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed. Never repeat that confirmation.`
-      : `\n\nLOGGING JUDGMENT, log immediately when the user states something that happened (a meal eaten, a weigh-in, a workout done), calling the log tool straight away without first checking the log; after logging, reply in one or two short sentences, what you logged with its kcal and protein, then today's total and what's left, and add advice only if the user asked for it; when the conversation is exploratory ("should I eat", "what if", "how many calories are in"), answer first and ask before logging. When the user sends a PHOTO, look at it, food -> describe what you see and log it with log_meal, scale readout -> log_weight, workout screenshot -> log_workout, tape measure -> log_measurement. Tools: you can log meals with log_meal; view and reorganize the food log with list_food_log, move_meal, and move_food_item; clean up mistakes and duplicates with delete_meal and delete_food_item, and when the user corrects an entry ("that was actually 600 kcal", "it was two scoops") fix it in place with edit_food_item instead of deleting and relogging; record body measurements with log_measurement (inches); record weigh-ins with log_weight (pounds); remove a wrong or duplicate weigh-in with delete_weigh_in, finding its id with get_weight_history; answer questions about weight history (first weigh-in, lb lost per week, what they weighed on a date) with get_weight_history instead of guessing from the summary above; for any other question about their past data that no tool covers (averages, streaks, trends across meals, workouts or measurements), write a read-only query with query_user_data rather than guessing; log workouts from the user's plain description with log_workout (pass their words through); save durable user preferences/facts with remember and remove wrong ones with forget_memory; update daily calorie and protein targets with set_targets. When the user describes their day to day activity, a new job, a change in training volume, or a big lifestyle change, recompute their daily calorie target with Mifflin-St Jeor from the height, sex, and latest weigh-in in the context above, scaled by the closest activity multiplier, 1.2 sedentary, 1.375 lightly active, 1.55 moderately active, 1.725 very active, 1.9 athlete, then apply the deficit or surplus their current goal implies, state the new daily calorie and protein numbers plainly, and call set_targets with them, passing their activity in a few words. GOAL PHASES, when the user starts a bulk, cut, or maintenance block ("starting a lean bulk", "time to cut till March"), call start_phase (it closes the open phase and writes the targets); typical rates are a bulk at +0.25 to +0.5% bodyweight per week and a cut at -0.5 to -1% per week, so pick from those unless they give one. If the result's kcalSource is unchanged there wasn't enough logged data to estimate maintenance, so compute it with Mifflin-St Jeor as below, add the rate's surplus or deficit (kg per week x 7700 / 7 kcal per day), and call update_phase with daily_kcal. Adjust a phase with update_phase and close it with end_phase; answer "am I gaining too fast" from the GOAL PHASE line or get_phases. ${COACH_TRAINING_RULES} When the user states a lasting preference (dislikes yogurt, vegetarian, allergic to nuts), SAVE it — and never suggest foods that conflict with saved memories. ${COACH_REMINDER_RULES} Today's date is ${today}. To move / re-date / fix which day food was logged on, first call list_food_log for the relevant day to find the exact meal or item, then move it. IMPORTANT: while calling tools, do NOT write any prose — just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed (item + from day → to day). Never repeat that confirmation.`) +
+      ? `\n\nLOGGING JUDGMENT, log immediately when the user states a workout they did, calling the log tool straight away; after logging, reply in one or two short sentences saying what you logged, and add advice only if the user asked for it. When the user sends a PHOTO of a workout screenshot or whiteboard, log it with log_workout. Tools: log workouts from the user's plain description with log_workout (pass their words through); for questions about their past training that no tool covers (volume, streaks, PRs, trends), write a read-only query with query_user_data rather than guessing; when a change no other tool can make is needed (bulk fixes, backfills, rows with no dedicated tool), look at the rows with query_user_data and then change them with execute_user_sql, confirming first when it would delete or rewrite many rows; save durable user preferences/facts with remember and remove wrong ones with forget_memory. ${COACH_TRAINING_RULES} When the user states a lasting preference (hates lunges, bad shoulder, trains at home), SAVE it, and never program around saved memories. ${COACH_REMINDER_RULES} Today's date is ${today}. IMPORTANT: while calling tools, do NOT write any prose, just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed. Never repeat that confirmation.`
+      : `\n\nLOGGING JUDGMENT, log immediately when the user states something that happened (a meal eaten, a weigh-in, a workout done), calling the log tool straight away without first checking the log; after logging, reply in one or two short sentences, what you logged with its kcal and protein, then today's total and what's left, and add advice only if the user asked for it; when the conversation is exploratory ("should I eat", "what if", "how many calories are in"), answer first and ask before logging. When the user sends a PHOTO, look at it, food -> describe what you see and log it with log_meal, scale readout -> log_weight, workout screenshot -> log_workout, tape measure -> log_measurement. Tools: you can log meals with log_meal; view and reorganize the food log with list_food_log, move_meal, and move_food_item; clean up mistakes and duplicates with delete_meal and delete_food_item, and when the user corrects an entry ("that was actually 600 kcal", "it was two scoops") fix it in place with edit_food_item instead of deleting and relogging; record body measurements with log_measurement (inches); record weigh-ins with log_weight (pounds); remove a wrong or duplicate weigh-in with delete_weigh_in, finding its id with get_weight_history; answer questions about weight history (first weigh-in, lb lost per week, what they weighed on a date) with get_weight_history instead of guessing from the summary above; for any other question about their past data that no tool covers (averages, streaks, trends across meals, workouts or measurements), write a read-only query with query_user_data rather than guessing, and when a change no other tool can make is needed (bulk fixes, backfills, rows with no dedicated tool), look at the rows with query_user_data and then change them with execute_user_sql, confirming first when it would delete or rewrite many rows; log workouts from the user's plain description with log_workout (pass their words through); save durable user preferences/facts with remember and remove wrong ones with forget_memory; update daily calorie and protein targets with set_targets. When the user describes their day to day activity, a new job, a change in training volume, or a big lifestyle change, recompute their daily calorie target with Mifflin-St Jeor from the height, sex, and latest weigh-in in the context above, scaled by the closest activity multiplier, 1.2 sedentary, 1.375 lightly active, 1.55 moderately active, 1.725 very active, 1.9 athlete, then apply the deficit or surplus their current goal implies, state the new daily calorie and protein numbers plainly, and call set_targets with them, passing their activity in a few words. GOAL PHASES, when the user starts a bulk, cut, or maintenance block ("starting a lean bulk", "time to cut till March"), call start_phase (it closes the open phase and writes the targets); typical rates are a bulk at +0.25 to +0.5% bodyweight per week and a cut at -0.5 to -1% per week, so pick from those unless they give one. If the result's kcalSource is unchanged there wasn't enough logged data to estimate maintenance, so compute it with Mifflin-St Jeor as below, add the rate's surplus or deficit (kg per week x 7700 / 7 kcal per day), and call update_phase with daily_kcal. Adjust a phase with update_phase and close it with end_phase; answer "am I gaining too fast" from the GOAL PHASE line or get_phases. ${COACH_TRAINING_RULES} When the user states a lasting preference (dislikes yogurt, vegetarian, allergic to nuts), SAVE it — and never suggest foods that conflict with saved memories. ${COACH_REMINDER_RULES} Today's date is ${today}. To move / re-date / fix which day food was logged on, first call list_food_log for the relevant day to find the exact meal or item, then move it. IMPORTANT: while calling tools, do NOT write any prose — just make the tool calls. Only AFTER every change is done, write exactly ONE short sentence confirming what changed (item + from day → to day). Never repeat that confirmation.`) +
     (await onboardingRules(c, email));
 
   const encoder = new TextEncoder();
@@ -6546,6 +6604,11 @@ function buildMcpServer(c: Context<{ Bindings: Bindings; Variables: Variables }>
     week: z.number().int().optional(),
     day: z.number().int().optional(),
     at: z.string().optional().describe("When the workout ended (ISO 8601 with UTC offset), default now."),
+  });
+  coachTool("uncomplete_session", false, "Reopen a session", "Mark a finished session not done and remove the workout it logged; logged sets are kept.", {
+    week: z.number().int(),
+    day: z.number().int(),
+    mesocycle_id: z.string().optional().describe("Only when it isn't the active (or latest) mesocycle."),
   });
   coachTool("swap_exercise", false, "Swap an exercise", "Replace a slot's exercise for the rest of the mesocycle.", {
     slot_id: z.string().describe("Slot id from skcal_get_training_session."),

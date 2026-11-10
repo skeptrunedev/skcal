@@ -256,6 +256,11 @@ export const api = {
       `/api/training/mesocycles/${mesoId}/sessions/${week}/${day}/complete`,
       "POST",
     ),
+  uncompleteSession: (mesoId: string, week: number, day: number) =>
+    jcall<{ ok: true; next: { week: number; day: number; label: string | null } | null; mesoReopened: boolean }>(
+      `/api/training/mesocycles/${mesoId}/sessions/${week}/${day}/uncomplete`,
+      "POST",
+    ),
   setFeedback: (mesoId: string, input: Partial<MuscleFeedback> & { week: number; day: number; muscle: string }) =>
     jcall<{ ok: true }>(`/api/training/mesocycles/${mesoId}/feedback`, "PUT", input),
   updateSet: (id: string, patch: { weightLb?: number | null; reps?: number | null; done?: boolean }) =>

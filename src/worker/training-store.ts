@@ -753,6 +753,47 @@ export async function completeSessionForUser(c: Env, email: string, mesoId: stri
   };
 }
 
+/**
+ * Undo completeSessionForUser: the session is open again and the workout it
+ * logged is removed. Logged sets and feedback stay (they are the user's data,
+ * and completing again re-logs them), and next week's already-planned sets
+ * stay too. A mesocycle that finished only because of this session goes back
+ * to active, unless another one has been started since.
+ */
+export async function uncompleteSessionForUser(c: Env, email: string, mesoId: string, week: number, dayPos: number) {
+  const L = await loadMeso(c, email, mesoId);
+  if (!L) return { error: "no mesocycle with that id" };
+  const day = L.days.find((d) => d.position === dayPos);
+  if (!day || !(week >= day.firstWeek && week <= L.meso.weeks)) return { error: "no such week/day in this mesocycle" };
+  const session = L.sessions.find((s) => s.week === week && s.dayId === day.id);
+  if (!session) return { error: "that session isn't complete" };
+
+  const d = db(c);
+  await d.batch([
+    d.delete(schema.mesoSessions).where(and(eq(schema.mesoSessions.mesoId, mesoId), eq(schema.mesoSessions.dayId, day.id), eq(schema.mesoSessions.week, week))),
+    ...(session.workoutId
+      ? [d.delete(schema.workouts).where(and(eq(schema.workouts.id, session.workoutId), eq(schema.workouts.userEmail, email)))]
+      : []),
+  ]);
+  L.sessions = L.sessions.filter((s) => s !== session);
+
+  let mesoReopened = false;
+  if (L.meso.status === "completed") {
+    const otherActive = (await d.select({ id: schema.mesocycles.id }).from(schema.mesocycles).where(and(eq(schema.mesocycles.userEmail, email), eq(schema.mesocycles.status, "active"))).limit(1))[0];
+    if (!otherActive) {
+      await d.update(schema.mesocycles).set({ status: "active", endedDate: null }).where(eq(schema.mesocycles.id, mesoId));
+      mesoReopened = true;
+    }
+  }
+  const next = nextSession(L);
+  return {
+    ok: true as const,
+    uncompleted: { week, day: dayPos, workoutRemoved: session.workoutId != null },
+    next: next ? { week: next.week, day: next.day.position, label: next.day.label } : null,
+    mesoReopened,
+  };
+}
+
 /** Swap a slot's exercise for this and later weeks (logged sets keep theirs). */
 export async function swapExerciseForUser(c: Env, email: string, slotId: string, ref: { exerciseId?: unknown; exerciseName?: unknown }, fromWeek = 1) {
   const slot = (await db(c).select().from(schema.mesoSlots).where(and(eq(schema.mesoSlots.id, slotId), eq(schema.mesoSlots.userEmail, email))).limit(1))[0];

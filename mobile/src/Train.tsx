@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeStyles, useTheme } from "./theme";
 import {
   trainingLibrary, mesocycles, mesocycle, createMesocycle, updateMesocycle, deleteMesocycle,
-  currentSession, session as getSession, completeSession, setFeedback, updateSet, deleteSet, addSet, swapExercise,
+  currentSession, session as getSession, completeSession, uncompleteSession, setFeedback, updateSet, deleteSet, addSet, swapExercise,
   todayLocal,
   type TrainingLibrary, type MesoSummary, type MesoDetail, type TrainingSession, type TrainingSet,
   type FeedbackScales, type SessionFeedback, type MesoPlanDay,
@@ -204,6 +204,19 @@ function SessionView({
     }
   };
 
+  const reopen = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await uncompleteSession(s.meso.id, s.week, s.day);
+      onDone();
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <View style={st.card}>
@@ -270,9 +283,14 @@ function SessionView({
           )}
         </Pressable>
       ) : (
-        <Text style={[st.meta, st.centerText]}>
-          Completed{s.completedAt ? ` ${new Date(s.completedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}
-        </Text>
+        <>
+          <Text style={[st.meta, st.centerText]}>
+            Completed{s.completedAt ? ` ${new Date(s.completedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}
+          </Text>
+          <Pressable style={[st.ghost, busy && st.btnDim]} onPress={reopen} disabled={busy} accessibilityRole="button">
+            <Text style={st.ghostText}>{busy ? "Saving…" : "Mark as not completed"}</Text>
+          </Pressable>
+        </>
       )}
 
       {ask && (
