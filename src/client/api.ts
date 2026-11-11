@@ -116,16 +116,12 @@ export type Workout = {
   createdAt: number;
 };
 export type ApiKey = { id: string; name: string; prefix: string; scopes: string[]; createdAt: number; lastUsedAt: number | null };
-// `source` is which store the reported status came from: an account can hold
-// both a Stripe row and an Apple StoreKit row, and `active` is true if either
-// grants access.
+// A live subscription bought before skcal went free (all null when there is
+// none). `source` is the store that bills it: Stripe on the web, Apple in iOS.
 export type Billing = {
-  active: boolean;
-  exempt: boolean;
   source: "stripe" | "apple" | null;
   status: string | null;
   periodEnd: number | null;
-  priceUsd: number;
 };
 export type Channel = { id: string; kind: "phone" | "telegram"; value: string; verified: boolean; createdAt: number };
 
@@ -212,11 +208,6 @@ export const api = {
   settings: () => jget<Settings>(`/api/settings`),
   updateSettings: (patch: Partial<Settings>) => jcall<Settings>(`/api/settings`, "PUT", patch),
   billing: () => jget<Billing>(`/api/billing`),
-  billingCheckout: async (): Promise<{ url: string }> => {
-    const r = await rawFetch(`/api/billing/checkout`, { method: "POST" });
-    if (!r.ok) throw new Error(`checkout → ${r.status}: ${await r.text().catch(() => "")}`);
-    return r.json() as Promise<{ url: string }>;
-  },
   billingPortal: async (): Promise<{ url: string }> => {
     const r = await rawFetch(`/api/billing/portal`, { method: "POST" });
     if (!r.ok) throw new Error(`portal → ${r.status}`);

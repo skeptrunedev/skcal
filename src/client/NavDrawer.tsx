@@ -77,7 +77,8 @@ export function NavDrawer({
   onInstallMcp: () => void;
   onApiKeys: () => void;
   onLinkedNumbers: () => void;
-  // null hides the item (billing-exempt accounts).
+  // null hides the item: only accounts still paying from before skcal went
+  // free have a subscription to manage.
   onBilling: (() => void) | null;
   coach: CoachHistory;
 }) {

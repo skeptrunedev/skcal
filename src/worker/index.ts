@@ -43,7 +43,6 @@ import { FEEDBACK_SCALES } from "./training";
 import {
   APPLE_BUNDLE_ID,
   APPLE_PRODUCT_IDS,
-  anyBillingRowActive,
   appleBillingState,
   appleGetSubscriptionState,
   appleGetTransaction,
@@ -82,11 +81,9 @@ type Bindings = {
   // When set (local dev + tests), unauthenticated requests fall back to a dev
   // identity instead of being rejected. Unset in production ⇒ 401.
   AUTH_DEV_BYPASS?: string;
-  // ---- Stripe billing (one $10/mo plan) ----
+  // ---- Stripe billing (dormant: skcal is free; see "Stripe billing" below) ----
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
-  STRIPE_PRICE_ID?: string;
-  BILLING_EXEMPT_EMAILS?: string;
   // ---- Apple in-app purchase (StoreKit 2 + App Store Server API) ----
   // An App Store Connect "In-App Purchase" key (NOT the App Store Connect API
   // key used for submissions). Unset today, so /api/apple/* answers 503 with
@@ -446,9 +443,11 @@ async function resolveApiKey(
   return { email: row.userEmail, scopes };
 }
 
-// ---- Stripe billing ---------------------------------------------------------
-// One $10/mo plan. The webhook keeps the `billing` table in sync; the guard
-// requires an active subscription for data routes (exempt emails + dev skip).
+// ---- Stripe billing (dormant) ----------------------------------------------
+// skcal is free, so nothing here gates access and nothing sells a plan. The
+// webhook still mirrors subscriptions that were bought before into `billing`,
+// so those subscribers can manage or cancel them and account deletion still
+// cancels them.
 /** A non-2xx Stripe response, keeping the HTTP status and Stripe's error code. */
 class StripeApiError extends Error {
   constructor(
@@ -482,14 +481,6 @@ async function stripeApi(
   return json;
 }
 
-function billingExempt(env: Bindings, email: string): boolean {
-  const list = (env.BILLING_EXEMPT_EMAILS ?? "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  return email === DEV_EMAIL || list.includes(email.toLowerCase());
-}
-
 /** Every store row for one account (at most one per source). */
 async function billingRows(c: Context<{ Bindings: Bindings; Variables: Variables }>, email: string) {
   return db(c).select().from(schema.billing).where(eq(schema.billing.userEmail, email));
@@ -504,38 +495,6 @@ async function stripeBillingRow(c: Context<{ Bindings: Bindings; Variables: Vari
       .where(and(eq(schema.billing.userEmail, email), eq(schema.billing.source, "stripe")))
       .limit(1)
   )[0];
-}
-
-// ---- TEMPORARY: Android is free until Play Billing ships --------------------
-// The Android app has no way to buy a subscription yet (its Play Billing module
-// is a stub), so the gate would park Android users on a paywall they cannot get
-// past. Until Play Billing ships, requests the mobile app tags with
-// `X-Skcal-Client: android` skip the subscription gate. Web and iOS are gated
-// exactly as before.
-//
-// The header is asserted by the client, so this is a pricing decision, not a
-// security boundary: any caller can send it, and that is accepted for as long
-// as this flag exists. To end it, delete the flag and androidFreeAccess().
-const ANDROID_FREE_UNTIL_PLAY_BILLING = true;
-
-function androidFreeAccess(c: Context<{ Bindings: Bindings; Variables: Variables }>): boolean {
-  return ANDROID_FREE_UNTIL_PLAY_BILLING && c.req.header("x-skcal-client") === "android";
-}
-
-async function hasActiveSubscription(
-  c: Context<{ Bindings: Bindings; Variables: Variables }>,
-  email: string,
-): Promise<boolean> {
-  // Dev bypass exempts everyone EXCEPT temp phone-signup accounts, so local
-  // dev / the sim harness exercise the real 402 onboarding gate end to end.
-  if (c.env.AUTH_DEV_BYPASS && !email.endsWith("@phone.skcal.fit")) return true;
-  // Billing not configured at all (no Stripe key AND no Apple IAP key) — never
-  // lock anyone out. Either one being present means the gate is live.
-  if (!c.env.STRIPE_SECRET_KEY && !appleIapConfigured(c.env)) return true;
-  if (billingExempt(c.env, email)) return true;
-  // Source-aware: an active Apple row and an expired Stripe row (or the reverse)
-  // must not cancel each other out, so any store saying yes is a yes.
-  return anyBillingRowActive(await billingRows(c, email));
 }
 
 function bufToBase64(buf: ArrayBuffer): string {
@@ -952,19 +911,9 @@ app.use("/api/*", async (c, next) => {
     return next();
   }
 
-  // Identity resolved — apply the subscription gate (billing-management routes
-  // stay reachable so an unsubscribed user can subscribe / manage billing).
-  // /api/apple/* is exempt for the same reason: the iOS paywall has to be able
-  // to verify a purchase it just made while the account is still unsubscribed.
-  // /api/account is exempt because deleting an account must never require a
-  // subscription (App Store guideline 5.1.1(v), Google Play account deletion).
-  const finish = async (email: string) => {
+  // Identity resolved. skcal is free, so a signed-in identity is all a route needs.
+  const finish = (email: string) => {
     c.set("email", email);
-    const billingRoute = path.startsWith("/api/billing") || path.startsWith("/api/apple/");
-    const accountRoute = path === "/api/account";
-    if (!billingRoute && !accountRoute && !androidFreeAccess(c) && !(await hasActiveSubscription(c, email))) {
-      return c.json({ error: "subscription required" }, 402);
-    }
     return next();
   };
 
@@ -4907,61 +4856,19 @@ app.delete("/api/keys/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-// ---- Billing (Stripe: one $10/mo plan) -------------------------------------
+// ---- Billing (dormant: skcal is free) ---------------------------------------
+// The account's live subscription from before skcal went free, if it still has
+// one (all null otherwise). It gates nothing. The apps read it to offer
+// "Billing" to those subscribers, so they can manage or cancel the plan with
+// whichever store bills them.
 app.get("/api/billing", async (c) => {
-  const email = c.get("email");
-  const exempt =
-    !!c.env.AUTH_DEV_BYPASS ||
-    (!c.env.STRIPE_SECRET_KEY && !appleIapConfigured(c.env)) ||
-    billingExempt(c.env, email);
-  const rows = await billingRows(c, email);
-  // Report whichever row is actually granting access, so the app shows Apple
-  // state for an App Store subscriber and Stripe state for a web subscriber.
-  const row = rows.find((r) => billingRowActive(r)) ?? rows.find((r) => r.source === "stripe") ?? rows[0];
+  const rows = await billingRows(c, c.get("email"));
+  const row = rows.find((r) => billingRowActive(r));
   return c.json({
-    active: await hasActiveSubscription(c, email),
-    exempt,
     source: row?.source ?? null,
     status: row?.status ?? null,
     periodEnd: row?.currentPeriodEnd?.getTime() ?? null,
-    priceUsd: 100,
   });
-});
-
-// Create a Stripe Checkout session for the subscription and hand back its URL.
-app.post("/api/billing/checkout", async (c) => {
-  const email = c.get("email");
-  if (!c.env.STRIPE_SECRET_KEY || !c.env.STRIPE_PRICE_ID) return c.json({ error: "billing not configured" }, 503);
-  const origin = new URL(c.req.url).origin;
-  try {
-    const row = await stripeBillingRow(c, email);
-    let customerId = row?.stripeCustomerId ?? null;
-    if (!customerId) {
-      const customer = await stripeApi(c.env, "customers", { email, "metadata[user_email]": email });
-      customerId = String(customer.id);
-      await db(c)
-        .insert(schema.billing)
-        .values({ userEmail: email, source: "stripe", stripeCustomerId: customerId })
-        .onConflictDoUpdate({
-          target: [schema.billing.userEmail, schema.billing.source],
-          set: { stripeCustomerId: customerId, updatedAt: new Date() },
-        });
-    }
-    const session = await stripeApi(c.env, "checkout/sessions", {
-      mode: "subscription",
-      customer: customerId,
-      "line_items[0][price]": c.env.STRIPE_PRICE_ID,
-      "line_items[0][quantity]": "1",
-      client_reference_id: email,
-      "subscription_data[metadata][user_email]": email,
-      allow_promotion_codes: "true",
-      success_url: `${origin}/?billing=success`,
-      cancel_url: `${origin}/?billing=canceled`,
-    });
-    return c.json({ url: session.url });
-  } catch (e) {
-    return c.json({ error: "checkout failed", detail: String(e) }, 502);
-  }
 });
 
 // Stripe Billing Portal (manage / cancel the subscription).
@@ -5679,55 +5586,6 @@ app.post("/api/onboard/photo", async (c) => {
   return c.json({ ok: true, kind });
 });
 
-// Agent daemon: Stripe checkout link for a linked (but unsubscribed) number.
-app.post("/api/onboard/checkout", async (c) => {
-  if (!c.env.AGENT_SERVICE_TOKEN || c.req.header("authorization") !== `Bearer ${c.env.AGENT_SERVICE_TOKEN}`) {
-    return c.json({ error: "unauthorized" }, 401);
-  }
-  if (!c.env.STRIPE_SECRET_KEY || !c.env.STRIPE_PRICE_ID) return c.json({ error: "billing not configured" }, 503);
-  const b = await c.req.json<{ phone?: string }>();
-  const phone = normalizePhone(b.phone ?? "");
-  if (!phone) return c.json({ error: "invalid phone" }, 400);
-  const chan = (
-    await db(c)
-      .select()
-      .from(schema.linkedChannels)
-      .where(and(eq(schema.linkedChannels.kind, "phone"), eq(schema.linkedChannels.value, phone)))
-      .limit(1)
-  )[0];
-  if (!chan?.verifiedAt) return c.json({ error: "not linked", code: "unlinked" }, 404);
-  const email = chan.userEmail;
-  try {
-    const row = await stripeBillingRow(c, email);
-    let customerId = row?.stripeCustomerId ?? null;
-    if (!customerId) {
-      const customer = await stripeApi(c.env, "customers", { email, "metadata[user_email]": email });
-      customerId = String(customer.id);
-      await db(c)
-        .insert(schema.billing)
-        .values({ userEmail: email, source: "stripe", stripeCustomerId: customerId })
-        .onConflictDoUpdate({
-          target: [schema.billing.userEmail, schema.billing.source],
-          set: { stripeCustomerId: customerId, updatedAt: new Date() },
-        });
-    }
-    const session = await stripeApi(c.env, "checkout/sessions", {
-      mode: "subscription",
-      customer: customerId,
-      "line_items[0][price]": c.env.STRIPE_PRICE_ID,
-      "line_items[0][quantity]": "1",
-      client_reference_id: email,
-      "subscription_data[metadata][user_email]": email,
-      allow_promotion_codes: "true",
-      success_url: "https://app.skcal.fit/?billing=success",
-      cancel_url: "https://app.skcal.fit/?billing=canceled",
-    });
-    return c.json({ url: session.url, email });
-  } catch (e) {
-    return c.json({ error: "checkout failed", detail: String(e) }, 502);
-  }
-});
-
 // ---- Agent conversation threads ---------------------------------------------
 // Durable per-phone iMessage history for the agent daemon (service token
 // only): the daemon seeds its in-process cache from GET on the first message
@@ -6078,19 +5936,8 @@ async function appleRowByOriginalId(
   )[0];
 }
 
-// What the iOS paywall needs before it can show a buy button. Reachable while
-// unsubscribed (the gate exempts /api/apple/*).
-app.get("/api/apple/config", async (c) => {
-  const email = c.get("email");
-  return c.json({
-    configured: appleIapConfigured(c.env),
-    bundleId: APPLE_BUNDLE_ID,
-    productIds: APPLE_PRODUCT_IDS,
-    appAccountToken: await appleAccountToken(c.env, email),
-  });
-});
-
-// Verify a StoreKit transaction and grant (or update) the Apple entitlement.
+// Verify a StoreKit transaction (a renewal, refund, or restore on an existing
+// App Store subscription) and mirror its state into `billing`.
 app.post("/api/apple/verify", async (c) => {
   const email = c.get("email");
   if (!appleIapConfigured(c.env)) {
@@ -6142,7 +5989,7 @@ app.post("/api/apple/verify", async (c) => {
     periodEnd: state.currentPeriodEnd,
     productId: info.productId,
     environment: fetched.sandbox ? "Sandbox" : "Production",
-    active: await hasActiveSubscription(c, email),
+    active: billingRowActive(state),
   });
 });
 
@@ -6706,9 +6553,6 @@ app.all("/mcp", async (c) => {
     await db(c).select({ email: schema.user.email }).from(schema.user).where(eq(schema.user.id, session.userId)).limit(1)
   )[0];
   if (!userRow) return c.json({ error: "unknown user" }, 401);
-  if (!(await hasActiveSubscription(c, userRow.email))) {
-    return c.json({ error: "subscription required — subscribe at https://app.skcal.fit" }, 402);
-  }
 
   const server = buildMcpServer(c, userRow.email);
   const transport = new StreamableHTTPTransport();

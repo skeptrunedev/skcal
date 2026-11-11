@@ -22,10 +22,8 @@ const fmtDate = (ts: number) => new Date(ts).toLocaleDateString(undefined, { mon
 // AddSheet (weigh-in, measurement). Same worker endpoints as the web app.
 export function Body({
   onAuthError,
-  onSubscriptionRequired,
 }: {
   onAuthError: (e: Error) => void;
-  onSubscriptionRequired?: () => void;
 }) {
   const s = useS();
   const { c } = useTheme();
@@ -46,12 +44,9 @@ export function Body({
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       if (err.message === "unauthorized") onAuthError(err);
-      else if (err.message === "subscription required") {
-        if (onSubscriptionRequired) onSubscriptionRequired();
-        else setError("This account is not active.");
-      } else setError(err.message);
+      else setError(err.message);
     }
-  }, [onAuthError, onSubscriptionRequired]);
+  }, [onAuthError]);
 
   useEffect(() => {
     load();

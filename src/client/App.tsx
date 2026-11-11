@@ -10,7 +10,6 @@ import { NavDrawer } from "./NavDrawer";
 import { McpInstall } from "./McpInstall";
 import { ApiKeys } from "./ApiKeys";
 import { LinkedNumbers } from "./LinkedNumbers";
-import { Subscribe } from "./Subscribe";
 import type { Billing } from "./api";
 import { useCoachHistory, CoachThread, type CoachHistory } from "./Coach";
 import type { CoachConversation } from "./api";
@@ -26,6 +25,9 @@ const REDUCE_MOTION =
   typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 type HistoryState = { view: View; scroll: number };
+
+// Where an App Store subscriber manages or cancels their plan.
+const APPLE_SUBSCRIPTIONS_URL = "https://apps.apple.com/account/subscriptions";
 
 // Cross-fade a view swap with the View Transitions API; instant swap when
 // unsupported or reduced motion is requested. `apply` must mutate the DOM
@@ -110,22 +112,15 @@ export default function App() {
   const [mcpOpen, setMcpOpen] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
   const [numbersOpen, setNumbersOpen] = useState(false);
-  // Subscription state (null while loading). Non-active blocks the app with the
-  // Subscribe screen; a ?billing=success return from Stripe forces a refetch.
+  // A live subscription bought before skcal went free, if the account has one.
+  // It only adds "Billing", so that subscriber can manage or cancel it.
   const [billing, setBilling] = useState<Billing | null>(null);
   useEffect(() => {
     if (!email) return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.has("billing")) {
-      params.delete("billing");
-      const qs = params.toString();
-      history.replaceState(history.state, "", window.location.pathname + (qs ? `?${qs}` : ""));
-    }
-    // Fail open on a fetch error so a transient blip never locks the app.
     api
       .billing()
       .then(setBilling)
-      .catch(() => setBilling({ active: true, exempt: false, source: null, status: null, periodEnd: null, priceUsd: 100 }));
+      .catch(() => {});
   }, [email]);
   // Account-wide app mode (shared with the iOS and Android apps). "workout"
   // strips calories, food, the scale, and weigh-ins out of every screen.
@@ -376,10 +371,6 @@ export default function App() {
     window.location.reload();
   };
 
-  // Signed in but not subscribed → the paywall (hold blank while loading).
-  if (billing === null) return <div className="app" />;
-  if (!billing.active) return <Subscribe billing={billing} email={email} onSignOut={signOutAndReload} />;
-
   return (
     <div className={`app ${navCollapsed ? "nav-collapsed" : ""}`}>
       <NavDrawer
@@ -419,18 +410,18 @@ export default function App() {
           setNumbersOpen(true);
         }}
         onBilling={
-          billing.exempt
-            ? null
-            : async () => {
+          billing?.source === "apple"
+            ? () => {
                 setDrawerOpen(false);
-                try {
-                  const { url } = await api.billingPortal();
-                  window.location.href = url;
-                } catch {
-                  const { url } = await api.billingCheckout().catch(() => ({ url: "" }));
+                window.location.href = APPLE_SUBSCRIPTIONS_URL;
+              }
+            : billing?.source === "stripe"
+              ? async () => {
+                  setDrawerOpen(false);
+                  const { url } = await api.billingPortal().catch(() => ({ url: "" }));
                   if (url) window.location.href = url;
                 }
-              }
+              : null
         }
         coach={coachNav}
       />

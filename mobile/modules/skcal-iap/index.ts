@@ -89,9 +89,10 @@ export async function getSubscriptionProduct(
  * Run the StoreKit purchase sheet. Rejects only on a real StoreKit failure; a
  * user cancel resolves with state "cancelled" so the caller can stay quiet.
  *
- * `appAccountToken` comes from GET /api/apple/config and binds the resulting
- * transaction to the signed-in account, which is how the Worker later refuses a
- * replayed transaction id.
+ * `appAccountToken` binds the resulting transaction to the signed-in account
+ * (the Worker derives it per account in appleAccountToken), which is how the
+ * Worker later refuses a replayed transaction id. skcal sells nothing today, so
+ * nothing in the app calls this.
  */
 export async function purchaseSubscription(
   productId: string = SKCAL_MONTHLY_PRODUCT_ID,

@@ -12,7 +12,7 @@ import {
 import { makeStyles, useTheme, type Palette } from "./theme";
 import { sendOtp, verifyOtp } from "./api";
 
-// Same pages the paywall links to.
+// skcal.fit legal pages, linked under the sign-in form.
 const PRIVACY_URL = "https://skcal.fit/privacy";
 const TERMS_URL = "https://skcal.fit/terms";
 

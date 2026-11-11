@@ -27,7 +27,6 @@ import { Today } from "./src/Today";
 import { Agent } from "./src/Agent";
 import { Train } from "./src/Train";
 import { Drawer, DrawerView } from "./src/Drawer";
-import { Paywall } from "./src/Paywall";
 import { AddSheet } from "./src/AddSheet";
 import { McpInstall } from "./src/McpInstall";
 import { ApiKeys } from "./src/ApiKeys";
@@ -40,21 +39,15 @@ import { PanelLeftIcon, PlusIcon } from "./src/icons";
 // Content height of the top bar (below the status-bar inset).
 const TOPBAR_H = 50;
 
-// The paywall sells through StoreKit, so it only exists on iOS. Android has no
-// purchase path until Play Billing ships, and the worker lets Android clients
-// through the subscription gate until then (ANDROID_FREE_UNTIL_PLAY_BILLING),
-// so Android never shows it.
-const HAS_PAYWALL = Platform.OS === "ios";
-
 // Account deletion confirmation. Apple can't be told to cancel an App Store
-// subscription on the user's behalf, so iOS says so before the user commits.
+// subscription on the user's behalf, so an account still paying Apple from
+// before skcal went free is told so before it commits.
 const DELETE_ACCOUNT_WARNING =
   "This permanently deletes your account and everything in it: weigh-ins, meals, photos, workouts, reminders, " +
-  "and agent history. It can't be undone." +
-  (Platform.OS === "ios"
-    ? "\n\nIf you subscribed through the App Store, also cancel it in Settings > your name > Subscriptions. " +
-      "Deleting your account doesn't stop App Store billing."
-    : "");
+  "and agent history. It can't be undone.";
+const APPLE_SUBSCRIPTION_WARNING =
+  "\n\nYour App Store subscription keeps billing until you cancel it in Settings > your name > Subscriptions. " +
+  "Deleting your account doesn't stop it.";
 
 type Session = { key: string; convId: string | null; messages: ChatMessage[] };
 
@@ -99,9 +92,6 @@ function Shell() {
   // that tells Today to refetch after the add sheet logs something.
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  // Set when any API call answers 402. Replaces the whole body with the paywall
-  // so no screen can surface a raw "subscription required" string.
-  const [blocked, setBlocked] = useState(false);
 
   // Agent conversation history — lives up here (like the web app) so the
   // drawer and the chat view share one state.
@@ -159,21 +149,18 @@ function Shell() {
     loadConversations();
   }, [authed, loadConversations]);
 
-  // StoreKit renewals, refunds, and Ask-to-Buy approvals. Anything that lands
-  // while the app is open gets pushed to /api/apple/verify immediately rather
-  // than waiting on an App Store Server Notification round trip. Also sweeps up
-  // transactions that were left unfinished by an earlier failed verify.
+  // StoreKit renewals, refunds, and revocations on an App Store subscription
+  // bought before skcal went free. Anything that lands while the app is open
+  // goes to /api/apple/verify immediately rather than waiting on an App Store
+  // Server Notification round trip, then the Billing item is refetched. Also
+  // sweeps up transactions an earlier failed verify left unfinished.
   useEffect(() => {
     if (!authed) return;
-    reconcilePendingTransactions()
-      .then((granted) => {
-        if (granted) setBlocked(false);
-      })
-      .catch(() => {
-        /* boot-time reconciliation is best-effort */
-      });
-    return watchTransactions((result) => {
-      if (result.outcome === "active") setBlocked(false);
+    reconcilePendingTransactions().catch(() => {
+      /* boot-time reconciliation is best-effort */
+    });
+    return watchTransactions(() => {
+      fetchBilling().then(setBilling).catch(() => {});
     });
   }, [authed]);
 
@@ -201,12 +188,12 @@ function Shell() {
     setConversations([]);
     setSession({ key: "new-0", convId: null, messages: [] });
     setView("today");
-    setBlocked(false);
     setAuthed(false);
   }, []);
 
   const confirmDeleteAccount = useCallback(() => {
-    Alert.alert("Delete your account?", DELETE_ACCOUNT_WARNING, [
+    const warning = DELETE_ACCOUNT_WARNING + (billing?.source === "apple" ? APPLE_SUBSCRIPTION_WARNING : "");
+    Alert.alert("Delete your account?", warning, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete account",
@@ -225,7 +212,7 @@ function Shell() {
         },
       },
     ]);
-  }, [signOut]);
+  }, [signOut, billing]);
 
   // Optimistic: flip the UI now, adopt what the server stored, and fall back
   // to the previous mode if the save fails.
@@ -354,18 +341,15 @@ function Shell() {
           keyboard's screen Y; root fills the screen from y=0, so that frame
           already includes the status bar and topbar and needs no offset. */}
       <KeyboardAvoidingView style={[s.body, sideInsets]} behavior="padding">
-        {blocked ? (
-          <Paywall onActivated={() => setBlocked(false)} />
-        ) : view === "today" ? (
+        {view === "today" ? (
           <Today
             onAuthError={onAuthError}
-            onSubscriptionRequired={HAS_PAYWALL ? () => setBlocked(true) : undefined}
             refreshKey={refreshKey}
             onDashboard={setDashboard}
             workoutOnly={workoutOnly}
           />
         ) : view === "train" ? (
-          <Train onAuthError={onAuthError} onSubscriptionRequired={HAS_PAYWALL ? () => setBlocked(true) : undefined} />
+          <Train onAuthError={onAuthError} />
         ) : (
           <Agent
             key={session.key}
@@ -394,10 +378,10 @@ function Shell() {
           onPickAvatar: pickAvatar,
           onApiKeys: fromDrawer(setKeysOpen),
           onLinkedNumbers: fromDrawer(setNumbersOpen),
-          // App Store subscribers manage their plan with Apple. Android has no
-          // purchase path yet, and web (Stripe) billing stays on the web app.
+          // Only a live App Store subscription from before skcal went free has
+          // anything to manage here; Stripe ones are managed on the web app.
           onBilling:
-            Platform.OS === "ios" && billing && !billing.exempt && billing.source === "apple"
+            Platform.OS === "ios" && billing?.source === "apple"
               ? () => {
                   setDrawerOpen(false);
                   Linking.openURL(APPLE_SUBSCRIPTIONS_URL);

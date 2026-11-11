@@ -363,7 +363,7 @@ export type BillingRowLike = {
   currentPeriodEnd?: Date | number | null;
 };
 
-/** Does this single (account, store) row currently grant access? */
+/** Is this (account, store) subscription live, i.e. paid through now? */
 export function billingRowActive(row: BillingRowLike | undefined | null, now: number = Date.now()): boolean {
   if (!row?.status) return false;
   const raw = row.currentPeriodEnd;
@@ -386,13 +386,4 @@ export function billingRowActive(row: BillingRowLike | undefined | null, now: nu
       // canceled / expired / revoked / unpaid / incomplete
       return false;
   }
-}
-
-/**
- * Source-aware entitlement: any store saying yes is a yes. Without this an
- * expired Stripe row would cancel out a live Apple one purely because it was
- * written more recently.
- */
-export function anyBillingRowActive(rows: BillingRowLike[], now: number = Date.now()): boolean {
-  return rows.some((row) => billingRowActive(row, now));
 }

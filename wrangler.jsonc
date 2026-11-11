@@ -34,21 +34,19 @@
   // skfit daemon to deliver.
   "triggers": { "crons": ["*/15 * * * *"] },
   "vars": {
-    // Stripe price for the single $10/mo plan (secret key + webhook signing
-    // secret live in Worker secrets). Exempt emails skip the subscription gate.
-    "STRIPE_PRICE_ID": "price_1ULc4lAORpgtf3daU2jJZRVk",
     "REVIEW_PHONE": "+15005550999",
     "TESTER_PHONE": "+15005550998",
     // Claude fast mode (2.5x output speed, 2x price). Our Anthropic org is not
     // enrolled yet (fast-mode limit 0 tokens/min), so it stays "0" until it is.
     "CLAUDE_FAST_MODE": "0",
-    // Comped accounts. Phone sign-ups are <digits>@phone.skcal.fit: Tessa,
-    // Joyce (Nick's mom), and Keira (Nick's sister, all three of her numbers).
-    "BILLING_EXEMPT_EMAILS": "me@skeptrune.com,nick.k@skeptrune.com,dev@local,19402492533@phone.skcal.fit,12484219220@phone.skcal.fit,12488709196@phone.skcal.fit,12488609196@phone.skcal.fit,12482316420@phone.skcal.fit",
+    // skcal is free. Billing is dormant: the Stripe secret key + webhook
+    // signing secret stay in Worker secrets so subscriptions bought before
+    // keep syncing and can still be managed or cancelled.
+    //
     // Apple in-app purchase needs no vars: the bundle id and product id are
     // constants in src/worker/apple.ts, and the App Store Connect In-App
     // Purchase key lives in Worker secrets as APPLE_IAP_KEY_ID,
-    // APPLE_IAP_ISSUER_ID and APPLE_IAP_PRIVATE_KEY. Until those are set,
+    // APPLE_IAP_ISSUER_ID and APPLE_IAP_PRIVATE_KEY. Without them,
     // /api/apple/* answers 503 iap_not_configured.
     //
     // Photon Spectrum project for the iMessage agent; access token (CLI user

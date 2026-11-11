@@ -184,18 +184,11 @@ function AppleHealthCard({
 
 export function Today({
   onAuthError,
-  onSubscriptionRequired,
   refreshKey,
   onDashboard,
   workoutOnly,
 }: {
   onAuthError: (e: Error) => void;
-  /**
-   * 402 from the API. The shell swaps in the paywall rather than showing a raw
-   * error. Omitted where there is no paywall (Android): the worker doesn't gate
-   * Android clients, so a 402 there is shown as a plain inactive-account error.
-   */
-  onSubscriptionRequired?: () => void;
   /** Bumped by the shell after the add sheet logs something: refetch. */
   refreshKey: number;
   /** Each fresh dashboard, so the shell can pick the add sheet's first tab. */
@@ -276,14 +269,10 @@ export function Today({
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       if (err.message === "unauthorized") onAuthError(err);
-      else if (err.message === "subscription required") {
-        if (onSubscriptionRequired) onSubscriptionRequired();
-        else setError("This account is not active.");
-      }
       else setError(err.message);
     }
     await side;
-  }, [day, workoutOnly, onAuthError, onSubscriptionRequired, onDashboard, loadReminders, loadMeals, loadWeights, loadWorkouts]);
+  }, [day, workoutOnly, onAuthError, onDashboard, loadReminders, loadMeals, loadWeights, loadWorkouts]);
 
   // A meal edit or removal changes both the list and the day's totals.
   const reloadDashboard = useCallback(async () => {

@@ -18,9 +18,9 @@ const WEB = Platform.OS === "web";
 const BASE = process.env.EXPO_PUBLIC_API_BASE ?? (WEB && __DEV__ ? "" : "https://app.skcal.fit");
 const TOKEN_KEY = "skcal_session_token";
 
-// Sent on every request to the worker so it knows which app is calling. The
-// worker's temporary ANDROID_FREE_UNTIL_PLAY_BILLING policy keys off
-// `android`; nothing is sent from the web preview, which isn't a store build.
+// Sent on every request to the worker so it knows which app is calling (the
+// worker drops cookies on native auth calls by it); nothing is sent from the
+// web preview, which isn't a store build.
 const CLIENT_HEADERS: Record<string, string> =
   Platform.OS === "android" || Platform.OS === "ios" ? { "x-skcal-client": Platform.OS } : {};
 
@@ -122,7 +122,6 @@ export async function dashboard(day: string = todayLocal()): Promise<Dashboard> 
   const tz = new Date().getTimezoneOffset();
   const r = await req(`/api/dashboard?date=${day}&tz=${tz}`);
   if (r.status === 401) throw new Error("unauthorized");
-  if (r.status === 402) throw new Error("subscription required");
   if (!r.ok) throw new Error(`dashboard → ${r.status}`);
   return r.json() as Promise<Dashboard>;
 }
@@ -420,10 +419,9 @@ export async function setReminderEnabled(id: string, enabled: boolean): Promise<
 }
 
 // Turn a failed response into the error the screens already branch on
-// (unauthorized / subscription required), else the worker's own message.
+// (unauthorized), else the worker's own message.
 async function fail(r: Response, label: string): Promise<never> {
   if (r.status === 401) throw new Error("unauthorized");
-  if (r.status === 402) throw new Error("subscription required");
   const b = (await r.json().catch(() => ({}))) as { error?: string };
   throw new Error(b.error ?? `${label} → ${r.status}`);
 }
@@ -565,7 +563,7 @@ export async function deleteWorkout(id: string): Promise<void> {
 }
 
 // JSON call that surfaces the worker's { error } message on failure, like the
-// web client's jcall (and fail() above for 401 / 402).
+// web client's jcall (and fail() above for 401).
 async function call<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   const r = await req(path, { method, body: body !== undefined ? JSON.stringify(body) : undefined });
   if (!r.ok) return fail(r, `${method} ${path}`);
@@ -793,15 +791,12 @@ export async function deleteChannel(id: string): Promise<void> {
   if (!r.ok) return fail(r, "deleteChannel");
 }
 
-// `source` is which store granted access: an account can hold both a Stripe
-// and an App Store subscription.
+// A live subscription bought before skcal went free (all null when there is
+// none). `source` is the store that bills it: Stripe on the web, Apple in iOS.
 export type Billing = {
-  active: boolean;
-  exempt: boolean;
   source: "stripe" | "apple" | null;
   status: string | null;
   periodEnd: number | null;
-  priceUsd: number;
 };
 export const billing = () => call<Billing>(`/api/billing`);
 
@@ -813,23 +808,8 @@ export const getSettings = () => call<Settings>(`/api/settings`);
 export const updateSettings = (patch: Partial<Settings>) => call<Settings>(`/api/settings`, "PUT", patch);
 
 // ---- Apple in-app purchase ----
-// Both routes are exempt from the worker's 402 subscription gate, so an
-// unsubscribed account can still reach them to buy or restore.
-
-export type AppleIapConfig = {
-  /** False until the In-App Purchase key secrets are set on the worker. */
-  configured: boolean;
-  bundleId: string;
-  productIds: string[];
-  /** Passed to StoreKit at purchase time so the transaction is bound to this account. */
-  appAccountToken: string;
-};
-
-export async function appleConfig(): Promise<AppleIapConfig> {
-  const r = await req(`/api/apple/config`);
-  if (!r.ok) throw new Error(`apple config → ${r.status}`);
-  return r.json() as Promise<AppleIapConfig>;
-}
+// Keeps an existing App Store subscription in sync: StoreKit hands the app a
+// renewal or refund, and the worker re-reads it from Apple.
 
 export type AppleVerifyResult = {
   ok: boolean;

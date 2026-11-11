@@ -181,10 +181,9 @@ export async function workerFetchNoBypass(path: string, init: RequestInit = {}):
   return instance.dispatchFetch(`http://example.com${path}`, init as never) as unknown as Promise<Response>;
 }
 
-// A third instance with a (fake) STRIPE_SECRET_KEY bound, which is what turns
-// the subscription gate ON. Dev bypass stays on, and the Worker deliberately
-// does NOT exempt @phone.skcal.fit accounts from the gate, so those emails are
-// how these tests reach the real 402 path.
+// A third instance with a (fake) STRIPE_SECRET_KEY bound: billing configured,
+// the way production runs. skcal is free, so this is where tests prove that
+// configured billing still gates nothing.
 let mfBilling: Miniflare | undefined;
 
 async function getMiniflareBilling(): Promise<Miniflare> {
@@ -192,7 +191,7 @@ async function getMiniflareBilling(): Promise<Miniflare> {
   return mfBilling;
 }
 
-/** Dispatch to the Worker with the subscription gate live. */
+/** Dispatch to the Worker with billing configured. */
 export async function workerFetchBilling(path: string, init: RequestInit = {}): Promise<Response> {
   const instance = await getMiniflareBilling();
   return instance.dispatchFetch(`http://example.com${path}`, init as never) as unknown as Promise<Response>;

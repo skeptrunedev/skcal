@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   APPLE_BUNDLE_ID,
-  anyBillingRowActive,
   appleBillingState,
   appleIapConfigured,
   appleJwtParts,
@@ -14,9 +13,10 @@ import {
 } from "../src/worker/apple";
 import { seedBillingRow, workerFetchBilling } from "./harness";
 
-// Apple in-app purchase. Everything provable without Apple's servers is proven
-// here: JWT construction and signing, the notification/transaction to billing
-// state mapping, and source-aware entitlement.
+// Apple in-app purchase, kept to sync App Store subscriptions bought before
+// skcal went free. Everything provable without Apple's servers is proven here:
+// JWT construction and signing, the notification/transaction to billing state
+// mapping, which rows count as a live subscription, and /api/billing.
 //
 // NOT covered, and not coverable until the Paid Applications Agreement is signed
 // and a subscription product exists: any real round trip against the App Store
@@ -233,8 +233,8 @@ describe("apple: notification → billing state", () => {
 
 // ---- source-aware entitlement -----------------------------------------------
 
-describe("apple: source-aware entitlement", () => {
-  it("a row only grants access for statuses that should grant access", () => {
+describe("apple: live subscription", () => {
+  it("a row is live only for statuses that should keep a subscriber billed", () => {
     expect(billingRowActive({ status: "active", currentPeriodEnd: NOW + DAY }, NOW)).toBe(true);
     expect(billingRowActive({ status: "trialing", currentPeriodEnd: NOW + DAY }, NOW)).toBe(true);
     expect(billingRowActive({ status: "past_due", currentPeriodEnd: NOW - 30 * DAY }, NOW)).toBe(true);
@@ -254,35 +254,11 @@ describe("apple: source-aware entitlement", () => {
   it("accepts Date as well as epoch ms (Drizzle hands back Date)", () => {
     expect(billingRowActive({ status: "active", currentPeriodEnd: new Date(NOW + DAY) }, NOW)).toBe(true);
   });
-
-  it("an active Apple row is not cancelled out by a dead Stripe row", () => {
-    const rows = [
-      { status: "canceled", currentPeriodEnd: NOW - 40 * DAY },
-      { status: "active", currentPeriodEnd: NOW + 20 * DAY },
-    ];
-    expect(anyBillingRowActive(rows, NOW)).toBe(true);
-    // and the reverse ordering
-    expect(anyBillingRowActive([...rows].reverse(), NOW)).toBe(true);
-  });
-
-  it("all sources dead means no access", () => {
-    expect(
-      anyBillingRowActive(
-        [
-          { status: "canceled", currentPeriodEnd: NOW - 40 * DAY },
-          { status: "expired", currentPeriodEnd: NOW - 5 * DAY },
-        ],
-        NOW,
-      ),
-    ).toBe(false);
-    expect(anyBillingRowActive([], NOW)).toBe(false);
-  });
 });
 
-// ---- routes (gate live, IAP keys absent) ------------------------------------
-// These run against a Worker instance with STRIPE_SECRET_KEY bound, which turns
-// the 402 subscription gate on. @phone.skcal.fit accounts are deliberately not
-// exempted by the dev bypass, so they exercise the real gate.
+// ---- routes (billing configured, IAP keys absent) ---------------------------
+// These run against a Worker instance with STRIPE_SECRET_KEY bound, the way
+// production runs, so they prove billing being configured gates nothing.
 
 const phone = (n: string) => `1555000${n}@phone.skcal.fit`;
 
@@ -293,7 +269,7 @@ function asPhoneUser(email: string, path: string, init: RequestInit = {}) {
 }
 
 describe("apple: routes without IAP keys configured", () => {
-  it("POST /api/apple/verify → 503 iap_not_configured, not a 500 or a 402", async () => {
+  it("POST /api/apple/verify → 503 iap_not_configured, not a 500", async () => {
     const res = await asPhoneUser(phone("100"), "/api/apple/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -315,84 +291,39 @@ describe("apple: routes without IAP keys configured", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ received: true, ignored: "iap not configured" });
   });
-
-  it("GET /api/apple/config reports unconfigured but still hands back the product id", async () => {
-    const res = await asPhoneUser(phone("101"), "/api/apple/config");
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { configured: boolean; bundleId: string; productIds: string[] };
-    expect(body.configured).toBe(false);
-    expect(body.bundleId).toBe("fit.skcal.app");
-    expect(body.productIds).toContain("fit.skcal.app.monthly");
-  });
-
-  it("appAccountToken is a stable UUID per account and differs between accounts", async () => {
-    const read = async (email: string) =>
-      ((await (await asPhoneUser(email, "/api/apple/config")).json()) as { appAccountToken: string }).appAccountToken;
-    const a1 = await read(phone("102"));
-    const a2 = await read(phone("102"));
-    const b1 = await read(phone("103"));
-    expect(a1).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-    expect(a1).toBe(a2);
-    expect(a1).not.toBe(b1);
-  });
 });
 
-describe("apple: the 402 gate", () => {
-  it("an unsubscribed account is blocked from data routes", async () => {
+type BillingBody = { source: string | null; status: string | null; periodEnd: number | null };
+const billingOf = async (email: string) => (await (await asPhoneUser(email, "/api/billing")).json()) as BillingBody;
+const NO_SUBSCRIPTION: BillingBody = { source: null, status: null, periodEnd: null };
+
+describe("free access and /api/billing", () => {
+  it("an account that never subscribed reaches data routes", async () => {
     const res = await asPhoneUser(phone("200"), "/api/dashboard");
-    expect(res.status).toBe(402);
-    expect(await res.json()).toEqual({ error: "subscription required" });
+    expect(res.status).toBe(200);
+    expect(await billingOf(phone("200"))).toEqual(NO_SUBSCRIPTION);
   });
 
-  it("but can still reach /api/apple/* to buy or restore", async () => {
-    // 503 (keys absent) rather than 402 is the point of this assertion: an
-    // unsubscribed user must be able to run the purchase flow.
-    const res = await asPhoneUser(phone("200"), "/api/apple/verify", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ transactionId: "1" }),
-    });
-    expect(res.status).toBe(503);
-  });
-
-  it("an active Apple row alone opens the gate", async () => {
-    const email = phone("201");
-    await seedBillingRow({
-      userEmail: email,
-      source: "apple",
-      status: "active",
-      currentPeriodEnd: Date.now() + 25 * DAY,
-      subscriptionId: "2000000800000201",
-    });
-    expect((await asPhoneUser(email, "/api/dashboard")).status).toBe(200);
-  });
-
-  it("an expired Stripe row cannot clobber a live Apple row", async () => {
-    const email = phone("202");
-    await seedBillingRow({ userEmail: email, source: "stripe", status: "canceled", currentPeriodEnd: Date.now() - 40 * DAY });
-    await seedBillingRow({ userEmail: email, source: "apple", status: "active", currentPeriodEnd: Date.now() + 25 * DAY });
-    expect((await asPhoneUser(email, "/api/dashboard")).status).toBe(200);
-    const billing = (await (await asPhoneUser(email, "/api/billing")).json()) as {
-      active: boolean;
-      source: string;
-      status: string;
-    };
-    expect(billing.active).toBe(true);
-    expect(billing.source).toBe("apple");
-    expect(billing.status).toBe("active");
-  });
-
-  it("a revoked Apple row cannot clobber a live Stripe row", async () => {
-    const email = phone("203");
-    await seedBillingRow({ userEmail: email, source: "apple", status: "revoked", currentPeriodEnd: Date.now() + 25 * DAY });
-    await seedBillingRow({ userEmail: email, source: "stripe", status: "active", currentPeriodEnd: Date.now() + 25 * DAY });
-    expect((await asPhoneUser(email, "/api/dashboard")).status).toBe(200);
-  });
-
-  it("both sources dead leaves the gate shut", async () => {
+  it("an account whose subscriptions all lapsed reaches data routes and reports none", async () => {
     const email = phone("204");
     await seedBillingRow({ userEmail: email, source: "apple", status: "expired", currentPeriodEnd: Date.now() - 10 * DAY });
     await seedBillingRow({ userEmail: email, source: "stripe", status: "canceled", currentPeriodEnd: Date.now() - 10 * DAY });
-    expect((await asPhoneUser(email, "/api/dashboard")).status).toBe(402);
+    expect((await asPhoneUser(email, "/api/dashboard")).status).toBe(200);
+    expect(await billingOf(email)).toEqual(NO_SUBSCRIPTION);
+  });
+
+  it("reports a live Apple subscription even next to a dead Stripe one", async () => {
+    const email = phone("202");
+    const periodEnd = Date.now() + 25 * DAY;
+    await seedBillingRow({ userEmail: email, source: "stripe", status: "canceled", currentPeriodEnd: Date.now() - 40 * DAY });
+    await seedBillingRow({ userEmail: email, source: "apple", status: "active", currentPeriodEnd: periodEnd });
+    expect(await billingOf(email)).toEqual({ source: "apple", status: "active", periodEnd });
+  });
+
+  it("reports a live Stripe subscription even next to a revoked Apple one", async () => {
+    const email = phone("203");
+    await seedBillingRow({ userEmail: email, source: "apple", status: "revoked", currentPeriodEnd: Date.now() + 25 * DAY });
+    await seedBillingRow({ userEmail: email, source: "stripe", status: "active", currentPeriodEnd: Date.now() + 25 * DAY });
+    expect((await billingOf(email)).source).toBe("stripe");
   });
 });
